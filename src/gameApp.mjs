@@ -2,9 +2,9 @@ import {
   ARROW_TYPES,
   ENEMY_TYPES,
   ENRICHMENT_PHRASES,
-  LEVEL_TIER_CONFIGS,
   TOWER_LEVELS,
   WORDS,
+  getArrowType,
   getLevelConfig,
   getLevelTier,
   getWordLengthRange,
@@ -36,8 +36,80 @@ canvas.width = W * DPR;
 canvas.height = H * DPR;
 ctx.scale(DPR, DPR);
 
+/* ============================================================
+   Illuminated-manuscript palette — heraldic pigments & gold leaf.
+   Titles set in blackletter (UnifrakturMaguntia); body in EB Garamond.
+   ============================================================ */
+const INK = "#2a1c0e";
+const GILT = "#c69a3a", GILT_HI = "#efcf7a", GILT_DK = "#8f6a1f";
+const VERMILION = "#a3301d";
+const PARCH_HI = "#f5ecd2", PARCH_DK = "#d6c398";
+const DISPLAY = "'UnifrakturMaguntia', 'EB Garamond', Georgia";
+const BODY = "'EB Garamond', Georgia";
+function giltFill(x0, y0, x1, y1) {
+  const g = ctx.createLinearGradient(x0, y0, x1, y1);
+  g.addColorStop(0, GILT_HI); g.addColorStop(0.5, GILT);
+  g.addColorStop(1, GILT_DK); return g;
+}
+
+// heraldic surcoat pigments for each foe of the spreadsheet bestiary
+const ENEMY_PIGMENTS = {
+  grunt: { body: "#b3a88c", trim: "#6b5a38" },
+  runner: { body: "#b98a3a", trim: "#6e4d17" },
+  chainmailGuard: { body: "#8b96a4", trim: "#3f4b3c" },
+  shieldBearer: { body: "#2b4a9b", trim: "#1d3468" },
+  swarm: { body: "#7a8f4a", trim: "#44522a" },
+  brute: { body: "#7c3f1d", trim: "#45210d" },
+  bannerCaptain: { body: "#6d3a7a", trim: "#3e1f47" },
+  siegeEnemy: { body: "#8a5a20", trim: "#4c3010" },
+  fireResistantKnight: { body: "#a3301d", trim: "#5c170c" },
+  boss: { body: "#3a332a", trim: "#171310" },
+};
+
 const arrowByKey = new Map(ARROW_TYPES.filter((arrow) => /^[1-6]$/.test(arrow.key)).map((arrow) => [arrow.key, arrow.id]));
-const enemyNameById = new Map(ENEMY_TYPES.map((enemy) => [enemy.id, enemy.name]));
+const ARROW_TINTS = {
+  normal: "#5b4325",
+  fire: VERMILION,
+  piercing: "#274a90",
+  ice: "#4a7f9b",
+  armorBreaker: "#57534e",
+  explosive: "#8a4a17",
+};
+
+/* ============================================================
+   Sound — tiny WebAudio synth, safe to fail silently
+   ============================================================ */
+let AC = null;
+function audio() {
+  if (!AC) { try { AC = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {} }
+  return AC;
+}
+function tone(freq, dur, type, vol, slideTo) {
+  const c = audio(); if (!c) return;
+  try {
+    if (c.state === "suspended") c.resume();
+    const t = c.currentTime;
+    const o = c.createOscillator(), g = c.createGain();
+    o.type = type; o.frequency.setValueAtTime(freq, t);
+    if (slideTo) o.frequency.exponentialRampToValueAtTime(slideTo, t + dur);
+    g.gain.setValueAtTime(vol, t);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    o.connect(g); g.connect(c.destination);
+    o.start(t); o.stop(t + dur + 0.02);
+  } catch (e) {}
+}
+const sfx = {
+  shoot()    { tone(380, 0.16, "sawtooth", 0.09, 110); },
+  hitArmor() { tone(230, 0.08, "square", 0.10, 150); },
+  kill()     { tone(330, 0.09, "triangle", 0.12); setTimeout(() => tone(494, 0.13, "triangle", 0.11), 70); },
+  knock()    { tone(72, 0.16, "sine", 0.28, 45); },
+  error()    { tone(110, 0.18, "sawtooth", 0.07, 78); },
+  type()     { tone(720, 0.025, "square", 0.02); },
+  badType()  { tone(170, 0.05, "square", 0.045); },
+  levelUp()  { tone(392, 0.1, "triangle", 0.11); setTimeout(() => tone(523, 0.11, "triangle", 0.11), 90); setTimeout(() => tone(659, 0.16, "triangle", 0.11), 180); },
+  horn()     { tone(262, 0.18, "triangle", 0.14); setTimeout(() => tone(330, 0.18, "triangle", 0.14), 140); setTimeout(() => tone(392, 0.3, "triangle", 0.13), 300); },
+  coin()     { tone(880, 0.06, "square", 0.05); setTimeout(() => tone(1245, 0.09, "square", 0.045), 60); },
+};
 
 const app = {
   screen: "start",
@@ -113,6 +185,10 @@ function startCampaign() {
   app.rngSeed = Date.now() >>> 0;
   app.rng = mulberry32(app.rngSeed);
   app.model = createGameModel({ level: 1, gold: 40, trainingPoints: 0, arrowCharge: 3 });
+  app.phraseIndex = 0;
+  app.message = "";
+  app.messageTimer = 0;
+  app.shakeTimer = 0;
   app.screen = "playing";
   setupLevel();
   announce("Level 1: hold the wall", 2.2);
@@ -177,6 +253,7 @@ function selectArrow(arrowId) {
   if (!getUnlockedArrowIds(tier).includes(arrowId)) {
     announce("That arrow is not unlocked yet", 1.3);
     app.shakeTimer = 0.25;
+    sfx.error();
     return;
   }
   app.model.activeArrowId = arrowId;
@@ -186,6 +263,7 @@ function fireArrow() {
   if (app.wordInput !== app.combatWord) {
     app.shakeTimer = 0.25;
     announce("Finish the combat word first", 1.1);
+    sfx.error();
     return;
   }
   const targets = sortedTargets();
@@ -199,12 +277,22 @@ function fireArrow() {
   if (arrowId !== "normal" && app.model.arrowCharge <= 0) {
     announce("No Arrow Charge left", 1.2);
     app.shakeTimer = 0.25;
+    sfx.error();
     return;
   }
   if (arrowId !== "normal") app.model.arrowCharge -= 1;
 
   const weaponDamage = getWeaponDamage(app.model.longbowmanTier);
-  const hitTargets = arrowId === "piercing" ? targets.slice(0, Math.min(3, targets.length)) : [primary];
+  let hitTargets;
+  if (arrowId === "piercing") {
+    hitTargets = targets.slice(0, Math.min(3, targets.length));
+  } else if (arrowId === "explosive") {
+    // area damage around the impact, per the spreadsheet's splashRadius
+    const radius = getArrowType("explosive").splashRadius;
+    hitTargets = targets.filter((enemy) => Math.abs(enemy.x - primary.x) <= radius);
+  } else {
+    hitTargets = [primary];
+  }
   for (const enemy of hitTargets) {
     const result = applyArrowHit(enemy, arrowId, { weaponDamage });
     app.arrows.push({
@@ -215,9 +303,10 @@ function fireArrow() {
       life: 0.28,
       arrowId,
     });
-    if (result.armorHit) addBurst(enemy.x, GROUND - 62, "#CBD5E1", 8);
+    if (result.armorHit) { addBurst(enemy.x, GROUND - 62, "#cfd6df", 8); sfx.hitArmor(); }
     if (!enemy.alive) defeatEnemy(enemy);
   }
+  if (arrowId === "explosive") addBurst(primary.x, GROUND - 52, "#c98a3a", 18);
 
   if (app.model.completedPhrases > 0 && app.model.completedPhrases % 2 === 0) {
     const bonus = targets.find((enemy) => enemy.alive);
@@ -227,6 +316,7 @@ function fireArrow() {
     }
   }
 
+  sfx.shoot();
   nextCombatWord();
 }
 
@@ -236,7 +326,8 @@ function defeatEnemy(enemy) {
   enemy.dyingTimer = 0.45;
   app.model.gold += enemy.rewardGold;
   app.defeatedThisLevel += 1;
-  addBurst(enemy.x, GROUND - 50, "#DC2626", 14);
+  addBurst(enemy.x, GROUND - 50, "#b03a2e", enemy.id === "boss" ? 26 : 14);
+  sfx.kill();
 }
 
 function addBurst(x, y, color, count) {
@@ -266,10 +357,12 @@ function completeLevelIfReady() {
   if (app.model.level >= 100) {
     app.screen = "victory";
     announce("Campaign complete", 4);
+    sfx.levelUp();
     return;
   }
   app.screen = "shop";
   announce(`Level ${app.model.level} cleared: +${clearBonus + bossBonus} gold`, 3);
+  sfx.horn();
 }
 
 function nextLevel() {
@@ -287,9 +380,12 @@ function buy(upgradeId) {
   if (ok) {
     const previewName = upgradeId === "repair" ? "Tower repaired" : "Upgrade purchased";
     announce(previewName, 1.4);
+    sfx.coin();
   } else {
-    announce("Not enough resources", 1.2);
+    if (upgradeId === "repair" && app.model.towerHp >= app.model.towerMaxHp) announce("The walls are already whole", 1.2);
+    else announce("Not enough resources", 1.2);
     app.shakeTimer = 0.25;
+    sfx.error();
   }
 }
 
@@ -298,16 +394,23 @@ function typeCharacter(char) {
     if (app.wordInput.length >= app.combatWord.length + 3) return;
     app.wordInput += char;
     app.model.combatInput = app.wordInput;
-    if (!app.combatWord.startsWith(app.wordInput)) app.shakeTimer = 0.12;
+    if (!app.combatWord.startsWith(app.wordInput)) { app.shakeTimer = 0.12; sfx.badType(); }
+    else sfx.type();
     return;
   }
   const before = app.model.trainingPoints;
+  const expected = app.model.enrichmentPhrase[app.model.enrichmentInput.length];
+  const lenBefore = app.model.enrichmentInput.length;
   app.model.typeChar(char);
   if (app.model.trainingPoints > before) {
     announce(`Training complete: +${app.model.trainingPoints - before} TP`, 1.6);
     app.model.arrowCharge += 1;
     nextEnrichmentPhrase();
+    sfx.coin();
+    return;
   }
+  if (app.model.enrichmentInput.length === lenBefore || char !== expected) sfx.badType();
+  else sfx.type();
 }
 
 function update(dt) {
@@ -355,7 +458,9 @@ function update(dt) {
         enemy.attackTimer -= 1.2;
         const reduction = TOWER_LEVELS[app.model.towerLevel - 1].damageReduction;
         app.model.towerHp = Math.max(0, app.model.towerHp - Math.ceil(enemy.towerDamage * (1 - reduction)));
-        addBurst(STOP_X - 8, GROUND - 52, "#7C2D12", 8);
+        addBurst(STOP_X - 8, GROUND - 52, "#8d8677", 8);
+        app.shakeTimer = Math.max(app.shakeTimer, 0.18);
+        sfx.knock();
         if (app.model.towerHp <= 0) app.screen = "gameover";
       }
     }
@@ -364,7 +469,10 @@ function update(dt) {
   completeLevelIfReady();
 }
 
-function drawRoundRect(x, y, w, h, r) {
+/* ============================================================
+   Drawing — an illuminated page from a campaign chronicle
+   ============================================================ */
+function rr(x, y, w, h, r) {
   ctx.beginPath();
   ctx.moveTo(x + r, y);
   ctx.arcTo(x + w, y, x + w, y + h, r);
@@ -374,165 +482,452 @@ function drawRoundRect(x, y, w, h, r) {
   ctx.closePath();
 }
 
-function panel(x, y, w, h, fill = "rgba(255,255,255,.86)") {
-  ctx.fillStyle = fill;
-  drawRoundRect(x, y, w, h, 8);
-  ctx.fill();
-  ctx.strokeStyle = "rgba(30,41,59,.24)";
-  ctx.lineWidth = 1;
-  ctx.stroke();
-}
+// deterministic foxing/age spots so the vellum doesn't shimmer
+const FOX = [];
+(function () {
+  let s = 1337;
+  const rnd = () => { s = (s * 1103515245 + 12345) & 0x7fffffff; return s / 0x7fffffff; };
+  for (let i = 0; i < 40; i++) FOX.push({ x: rnd() * W, y: rnd() * H, r: 6 + rnd() * 26, a: 0.03 + rnd() * 0.05 });
+})();
 
 function drawBackground() {
-  const sky = ctx.createLinearGradient(0, 0, 0, GROUND);
-  sky.addColorStop(0, "#93C5FD");
-  sky.addColorStop(0.65, "#DBEAFE");
-  sky.addColorStop(1, "#ECFCCB");
-  ctx.fillStyle = sky;
-  ctx.fillRect(0, 0, W, GROUND);
+  // vellum ground tone across the whole leaf
+  const page = ctx.createLinearGradient(0, 0, 0, H);
+  page.addColorStop(0, "#f2e8cc");
+  page.addColorStop(0.55, "#ece0bf");
+  page.addColorStop(1, "#e3d4ac");
+  ctx.fillStyle = page;
+  ctx.fillRect(0, 0, W, H);
 
-  ctx.fillStyle = "#86A86E";
-  ctx.beginPath();
-  ctx.ellipse(430, GROUND + 35, 520, 120, 0, Math.PI, Math.PI * 2);
-  ctx.fill();
-  ctx.fillStyle = "#6B8F56";
+  // foxing — faint age spots in warm umber
+  for (const f of FOX) {
+    ctx.fillStyle = "rgba(120,86,40," + f.a + ")";
+    ctx.beginPath(); ctx.arc(f.x, f.y, f.r, 0, 7); ctx.fill();
+  }
+
+  // gold-leaf sun, ink-ringed, with radiating rays (heraldic "sun in splendour")
+  const sx = 886, sy = 90;
+  ctx.save();
+  ctx.strokeStyle = "rgba(150,110,30,0.5)";
+  ctx.lineWidth = 2;
+  for (let i = 0; i < 16; i++) {
+    const a = i / 16 * Math.PI * 2;
+    ctx.beginPath();
+    ctx.moveTo(sx + Math.cos(a) * 34, sy + Math.sin(a) * 34);
+    ctx.lineTo(sx + Math.cos(a) * (i % 2 ? 48 : 42), sy + Math.sin(a) * (i % 2 ? 48 : 42));
+    ctx.stroke();
+  }
+  const gl = ctx.createRadialGradient(sx - 8, sy - 8, 4, sx, sy, 28);
+  gl.addColorStop(0, GILT_HI); gl.addColorStop(0.7, GILT); gl.addColorStop(1, GILT_DK);
+  ctx.fillStyle = gl;
+  ctx.beginPath(); ctx.arc(sx, sy, 28, 0, 7); ctx.fill();
+  ctx.strokeStyle = INK; ctx.lineWidth = 1.6;
+  ctx.beginPath(); ctx.arc(sx, sy, 28, 0, 7); ctx.stroke();
+  ctx.restore();
+
+  // scrollwork clouds — thin ink outline, cream fill, drifting
+  const t = performance.now() / 1000;
+  for (let i = 0; i < 3; i++) {
+    const cx = ((t * (7 + i * 3) + i * 380) % (W + 240)) - 120;
+    const cy = 200 + i * 34;
+    ctx.beginPath();
+    ctx.ellipse(cx, cy, 44, 13, 0, 0, 7);
+    ctx.ellipse(cx + 30, cy - 8, 28, 11, 0, 0, 7);
+    ctx.ellipse(cx - 28, cy - 5, 24, 9, 0, 0, 7);
+    ctx.fillStyle = "rgba(250,244,226,0.72)";
+    ctx.fill();
+    ctx.strokeStyle = "rgba(120,92,50,0.4)";
+    ctx.lineWidth = 1;
+    ctx.stroke();
+  }
+
+  // ink-outlined rolling hills in verdigris pigment
+  function hill(cy, ry, fill, dark) {
+    ctx.fillStyle = fill;
+    ctx.beginPath(); ctx.ellipse(W * 0.28, cy, 430, ry, 0, Math.PI, 0); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(W * 0.8, cy + 12, 470, ry + 18, 0, Math.PI, 0); ctx.fill();
+    ctx.strokeStyle = dark; ctx.lineWidth = 1.6;
+    ctx.beginPath(); ctx.ellipse(W * 0.28, cy, 430, ry, 0, Math.PI, 0); ctx.stroke();
+    ctx.beginPath(); ctx.ellipse(W * 0.8, cy + 12, 470, ry + 18, 0, Math.PI, 0); ctx.stroke();
+  }
+  hill(GROUND + 26, 88, "#8ba36f", "rgba(60,74,44,0.55)");
+  hill(GROUND + 40, 108, "#6f8a56", "rgba(52,64,38,0.6)");
+
+  // ground band — warm sward with an ink horizon rule and hatch tufts
+  ctx.fillStyle = "#7d9457";
   ctx.fillRect(0, GROUND, W, H - GROUND);
-  ctx.fillStyle = "#557A44";
-  ctx.fillRect(0, GROUND, W, 6);
+  ctx.strokeStyle = INK;
+  ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.moveTo(0, GROUND); ctx.lineTo(W, GROUND); ctx.stroke();
+  ctx.strokeStyle = "rgba(48,60,34,0.5)";
+  ctx.lineWidth = 1.4;
+  for (let i = 0; i < 38; i++) {
+    const gx = (i * 137 + 40) % W, gy = GROUND + 16 + (i * 53) % 40;
+    ctx.beginPath();
+    ctx.moveTo(gx, gy); ctx.lineTo(gx - 3, gy - 8);
+    ctx.moveTo(gx, gy); ctx.lineTo(gx, gy - 10);
+    ctx.moveTo(gx, gy); ctx.lineTo(gx + 3, gy - 8);
+    ctx.stroke();
+  }
+}
+
+function fleurDeLis(x, y, s, color) {
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  ctx.moveTo(x, y - s);
+  ctx.quadraticCurveTo(x + s * 0.4, y - s * 0.15, x, y + s * 0.5);
+  ctx.quadraticCurveTo(x - s * 0.4, y - s * 0.15, x, y - s);
+  ctx.fill();
+  ctx.beginPath(); ctx.arc(x - s * 0.55, y - s * 0.1, s * 0.3, 0, 7); ctx.fill();
+  ctx.beginPath(); ctx.arc(x + s * 0.55, y - s * 0.1, s * 0.3, 0, 7); ctx.fill();
+  ctx.fillRect(x - s * 0.6, y + s * 0.18, s * 1.2, s * 0.26);
+  ctx.fillRect(x - s * 0.14, y + s * 0.5, s * 0.28, s * 0.42);
+}
+
+// enemy rallying banner planted where the host musters
+function drawEnemyBanner() {
+  const px = W - 42, top = GROUND - 82;
+  ctx.strokeStyle = "#5a5245";
+  ctx.lineWidth = 3;
+  ctx.beginPath(); ctx.moveTo(px, GROUND); ctx.lineTo(px, top); ctx.stroke();
+  const wob = Math.sin(performance.now() / 320 + 2) * 2.5;
+  ctx.beginPath();
+  ctx.moveTo(px, top);
+  ctx.lineTo(px - 36, top + wob);
+  ctx.lineTo(px - 27, top + 11 + wob);
+  ctx.lineTo(px - 36, top + 22 + wob);
+  ctx.lineTo(px, top + 22);
+  ctx.closePath();
+  ctx.fillStyle = "#2b4a9b";
+  ctx.fill();
+  ctx.strokeStyle = "#1d3468";
+  ctx.lineWidth = 1;
+  ctx.stroke();
+  fleurDeLis(px - 13, top + 11 + wob / 2, 6, "#e8c33a");
 }
 
 function drawTower() {
-  const hpFrac = app.model.towerHp / app.model.towerMaxHp;
-  ctx.fillStyle = "#A8A29E";
-  ctx.fillRect(TOWER_X, 260, TOWER_W, GROUND - 260);
-  ctx.strokeStyle = "#57534E";
+  const top = 260;
+  const hpFrac = Math.max(0, app.model.towerHp / app.model.towerMaxHp);
+  // body
+  ctx.fillStyle = "#c2b18d";
+  ctx.fillRect(TOWER_X, top, TOWER_W, GROUND - top);
+  ctx.strokeStyle = INK;
+  ctx.lineWidth = 2;
+  ctx.strokeRect(TOWER_X, top, TOWER_W, GROUND - top);
+  // mortar lines
+  ctx.lineWidth = 1;
+  ctx.strokeStyle = "rgba(110,105,90,0.55)";
+  for (let yy = top + 22; yy < GROUND; yy += 22) {
+    ctx.beginPath(); ctx.moveTo(TOWER_X, yy); ctx.lineTo(TOWER_X + TOWER_W, yy); ctx.stroke();
+    const off = ((yy - top) / 22) % 2 ? 14 : 0;
+    for (let xx = TOWER_X + off + 14; xx < TOWER_X + TOWER_W; xx += 28) {
+      ctx.beginPath(); ctx.moveTo(xx, yy); ctx.lineTo(xx, yy - 22); ctx.stroke();
+    }
+  }
+  // crenellations
+  ctx.fillStyle = "#c2b18d";
+  ctx.strokeStyle = INK;
+  for (let i = 0; i < 4; i++) {
+    const mx = TOWER_X - 2 + i * (TOWER_W + 4 - 18) / 3;
+    ctx.fillRect(mx, top - 16, 18, 16);
+    ctx.strokeRect(mx, top - 16, 18, 16);
+  }
+
+  // St George's cross — the defender's standard, flying toward the foe
+  const fpx = TOWER_X + TOWER_W - 12, fpTop = top - 78;
+  ctx.strokeStyle = "#5a5245";
   ctx.lineWidth = 3;
-  ctx.strokeRect(TOWER_X, 260, TOWER_W, GROUND - 260);
-
-  ctx.fillStyle = "#78716C";
-  for (let y = 282; y < GROUND; y += 28) {
-    ctx.fillRect(TOWER_X, y, TOWER_W, 2);
-    for (let x = TOWER_X + 16 + ((y / 28) % 2) * 18; x < TOWER_X + TOWER_W; x += 36) ctx.fillRect(x, y - 24, 2, 24);
-  }
-  for (let i = 0; i < 4; i += 1) {
-    ctx.fillStyle = "#A8A29E";
-    ctx.fillRect(TOWER_X - 4 + i * 37, 238, 26, 24);
-    ctx.strokeRect(TOWER_X - 4 + i * 37, 238, 26, 24);
-  }
-
-  ctx.fillStyle = "#1E293B";
-  ctx.fillRect(TOWER_X + 32, 356, 16, 48);
-  ctx.fillStyle = "#654321";
-  drawRoundRect(TOWER_X + 39, GROUND - 64, 42, 64, 14);
+  ctx.beginPath(); ctx.moveTo(fpx, top - 14); ctx.lineTo(fpx, fpTop); ctx.stroke();
+  const wob = Math.sin(performance.now() / 350) * 2.5;
+  ctx.save();
+  ctx.beginPath();
+  ctx.moveTo(fpx, fpTop);
+  ctx.lineTo(fpx + 34, fpTop + wob);
+  ctx.lineTo(fpx + 34, fpTop + 20 + wob);
+  ctx.lineTo(fpx, fpTop + 20);
+  ctx.closePath();
+  ctx.fillStyle = "#f4f1e8";
   ctx.fill();
+  ctx.clip();
+  ctx.fillStyle = "#c8102e";
+  ctx.fillRect(fpx, fpTop + 7 + wob / 2, 34, 6);
+  ctx.fillRect(fpx + 13, fpTop - 3, 7, 28);
+  ctx.restore();
+  ctx.strokeStyle = "rgba(90,82,69,0.6)";
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(fpx, fpTop); ctx.lineTo(fpx + 34, fpTop + wob);
+  ctx.lineTo(fpx + 34, fpTop + 20 + wob); ctx.lineTo(fpx, fpTop + 20);
+  ctx.closePath(); ctx.stroke();
 
-  panel(TOWER_X - 10, 204, TOWER_W + 20, 36, "rgba(255,255,255,.78)");
-  ctx.fillStyle = "#0F172A";
-  ctx.font = "bold 13px Georgia";
+  // arrow slit + door
+  ctx.fillStyle = "#4b4437";
+  ctx.fillRect(TOWER_X + TOWER_W / 2 - 3, top + 70, 6, 26);
+  ctx.fillStyle = "#6b4a2a";
+  rr(TOWER_X + TOWER_W / 2 - 15, GROUND - 40, 30, 40, 10); ctx.fill();
+  ctx.strokeStyle = "#4a3018"; ctx.stroke();
+
+  // cracks as HP drops
+  ctx.strokeStyle = "rgba(60,55,45,0.8)";
+  ctx.lineWidth = 1.6;
+  if (hpFrac < 0.66) {
+    ctx.beginPath();
+    ctx.moveTo(TOWER_X + TOWER_W - 8, GROUND - 8); ctx.lineTo(TOWER_X + TOWER_W - 26, GROUND - 52);
+    ctx.lineTo(TOWER_X + TOWER_W - 14, GROUND - 86); ctx.lineTo(TOWER_X + TOWER_W - 30, GROUND - 122);
+    ctx.stroke();
+  }
+  if (hpFrac < 0.33) {
+    ctx.beginPath();
+    ctx.moveTo(TOWER_X + 10, GROUND - 4); ctx.lineTo(TOWER_X + 30, GROUND - 60);
+    ctx.lineTo(TOWER_X + 18, GROUND - 100); ctx.lineTo(TOWER_X + 40, GROUND - 150);
+    ctx.stroke();
+  }
+
+  // tower HP bar — above the flag, clear of the crenellations
+  const bw = TOWER_W + 8, bx = TOWER_X - 4, by = top - 104;
+  ctx.fillStyle = "rgba(0,0,0,0.35)";
+  rr(bx, by, bw, 12, 6); ctx.fill();
+  ctx.fillStyle = hpFrac > 0.5 ? "#5cab5c" : hpFrac > 0.25 ? "#d9a441" : "#c0503f";
+  if (hpFrac > 0) { rr(bx + 1.5, by + 1.5, Math.max(4, (bw - 3) * hpFrac), 9, 4.5); ctx.fill(); }
+  ctx.fillStyle = "#2e2a22";
+  ctx.font = "bold 11px " + BODY;
+  ctx.textAlign = "left";
+  ctx.fillText("TOWER  " + app.model.towerHp + " / " + app.model.towerMaxHp, bx + 2, by - 4);
+  // the keep's name, set like a rubricated caption
   ctx.textAlign = "center";
-  ctx.fillText(TOWER_LEVELS[app.model.towerLevel - 1].name, TOWER_X + TOWER_W / 2, 225);
-  ctx.fillStyle = "#111827";
-  ctx.fillRect(TOWER_X - 8, 244, TOWER_W + 16, 13);
-  ctx.fillStyle = hpFrac > 0.5 ? "#16A34A" : hpFrac > 0.25 ? "#F59E0B" : "#DC2626";
-  ctx.fillRect(TOWER_X - 6, 246, Math.max(0, (TOWER_W + 12) * hpFrac), 9);
+  ctx.font = "italic 13px " + BODY;
+  ctx.fillStyle = "rgba(94,58,20,0.85)";
+  ctx.fillText(TOWER_LEVELS[app.model.towerLevel - 1].name, TOWER_X + TOWER_W / 2, by + 26);
 }
 
 function drawArcher() {
   const x = 142;
   const y = 255;
-  ctx.strokeStyle = "#3F2F21";
-  ctx.lineWidth = 4;
+  const target = closestEnemy();
+  const ready = app.screen === "playing" && app.model.mode === "combat" && app.wordInput === app.combatWord && app.combatWord.length > 0;
+  const ang = target ? Math.max(-0.5, Math.min(0.45, Math.atan2(y + 40 - (GROUND - 40), target.x - x) * -1)) : 0.35;
+
+  ctx.strokeStyle = "#3a3128";
+  ctx.lineWidth = 3;
   ctx.lineCap = "round";
+  // planted stance on the tower top
   ctx.beginPath();
   ctx.moveTo(x, y + 44);
-  ctx.lineTo(x - 10, y + 76);
+  ctx.lineTo(x - 8, y + 74);
   ctx.moveTo(x, y + 44);
-  ctx.lineTo(x + 16, y + 75);
-  ctx.moveTo(x, y + 6);
-  ctx.lineTo(x, y + 46);
+  ctx.lineTo(x + 7, y + 74);
+  ctx.stroke();
+  // straight back
+  ctx.beginPath(); ctx.moveTo(x, y + 10); ctx.lineTo(x, y + 46); ctx.stroke();
+
+  // quiver at the hip
+  ctx.save();
+  ctx.translate(x - 9, y + 40);
+  ctx.rotate(0.5);
+  ctx.fillStyle = "#6b4a2a";
+  ctx.fillRect(-3, -9, 6, 15);
+  ctx.strokeStyle = "#5b4325";
+  ctx.lineWidth = 1.4;
+  ctx.beginPath();
+  ctx.moveTo(-1, -9); ctx.lineTo(-2, -15);
+  ctx.moveTo(2, -9); ctx.lineTo(1, -15);
+  ctx.stroke();
+  ctx.restore();
+
+  // longbowman's surcoat — white with St George's cross
+  ctx.fillStyle = "#f4f1e8";
+  ctx.fillRect(x - 7, y + 8, 14, 20);
+  ctx.fillStyle = "#c8102e";
+  ctx.fillRect(x - 1.5, y + 8, 3, 20);
+  ctx.fillRect(x - 7, y + 16, 14, 3);
+  ctx.strokeStyle = "rgba(60,50,40,0.35)";
+  ctx.lineWidth = 1;
+  ctx.strokeRect(x - 7, y + 8, 14, 20);
+
+  // hooded head, eyes on the field
+  ctx.fillStyle = "#e0b48e";
+  ctx.beginPath(); ctx.arc(x + 1, y - 1, 7, 0, 7); ctx.fill();
+  ctx.fillStyle = "#4e6b3a";
+  ctx.beginPath(); ctx.arc(x + 1, y - 2, 7.4, Math.PI * 0.95, Math.PI * 1.95); ctx.fill();
+
+  // arms to the great warbow
+  const bx = x + 26, by = y + 16;
+  const pull = ready ? -10 : 0;
+  ctx.strokeStyle = "#3a3128";
+  ctx.lineWidth = 3;
+  ctx.beginPath(); ctx.moveTo(x, y + 14); ctx.lineTo(bx, by); ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(x, y + 14);
+  if (ready) ctx.lineTo(bx + pull, by);
+  else ctx.lineTo(x - 5, y + 28);
   ctx.stroke();
 
-  ctx.fillStyle = "#F8FAFC";
-  ctx.fillRect(x - 13, y + 10, 26, 34);
-  ctx.fillStyle = "#DC2626";
-  ctx.fillRect(x - 2, y + 10, 4, 34);
-  ctx.fillRect(x - 13, y + 23, 26, 4);
-  ctx.fillStyle = "#F3C7A4";
+  ctx.save();
+  ctx.translate(bx, by);
+  ctx.rotate(-ang);
+  // the warbow — tinted faintly by the chosen arrow
+  ctx.strokeStyle = app.model.activeArrowId === "normal" ? "#7a4a22" : ARROW_TINTS[app.model.activeArrowId] ?? "#7a4a22";
+  ctx.lineWidth = 3;
+  ctx.beginPath(); ctx.arc(0, 0, 22, -Math.PI / 2.15, Math.PI / 2.15); ctx.stroke();
+  const tipX = 22 * Math.cos(Math.PI / 2.15), tipY = 22 * Math.sin(Math.PI / 2.15);
+  ctx.strokeStyle = "#e8e4d8";
+  ctx.lineWidth = 1;
   ctx.beginPath();
-  ctx.arc(x, y - 3, 11, 0, Math.PI * 2);
-  ctx.fill();
+  ctx.moveTo(tipX, -tipY);
+  ctx.lineTo(pull, 0);
+  ctx.lineTo(tipX, tipY);
+  ctx.stroke();
+  if (ready) {
+    ctx.strokeStyle = "#5b4325";
+    ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(pull, 0); ctx.lineTo(26, 0); ctx.stroke();
+    ctx.fillStyle = "#c9cdd4";
+    ctx.beginPath(); ctx.moveTo(26, 0); ctx.lineTo(20.5, -3); ctx.lineTo(20.5, 3); ctx.closePath(); ctx.fill();
+  }
+  ctx.restore();
+}
 
-  ctx.strokeStyle = app.model.activeArrowId === "fire" ? "#DC2626" : app.model.activeArrowId === "piercing" ? "#2563EB" : "#7C2D12";
-  ctx.lineWidth = 4;
+// shared figure so the field and the start-screen legend match
+function drawEnemyFigure(enemy, knockLunge) {
+  const pig = ENEMY_PIGMENTS[enemy.id] ?? { body: "#8b8272", trim: "#4c443a" };
+  const swing = knockLunge > 0 ? 0 : Math.sin(enemy.phase) * 0.55;
+
+  ctx.strokeStyle = "#2f2a24";
+  ctx.lineWidth = 3;
+  ctx.lineCap = "round";
+  // legs
   ctx.beginPath();
-  ctx.arc(x + 34, y + 20, 38, -1.25, 1.25);
+  ctx.moveTo(0, -16); ctx.lineTo(Math.sin(swing) * 7, 0);
+  ctx.moveTo(0, -16); ctx.lineTo(-Math.sin(swing) * 7, 0);
   ctx.stroke();
-  ctx.strokeStyle = "#F8FAFC";
-  ctx.lineWidth = 1.5;
+  // body
+  ctx.fillStyle = pig.body;
+  ctx.strokeStyle = pig.trim;
+  ctx.lineWidth = 1.6;
+  rr(-8, -38, 16, 23, 4); ctx.fill(); ctx.stroke();
+  // chain mail speckle for the armored
+  if (enemy.id === "chainmailGuard" || enemy.id === "fireResistantKnight") {
+    ctx.fillStyle = "rgba(70,78,88,0.5)";
+    for (let yy = -35; yy < -18; yy += 4)
+      for (let xx = -6; xx < 8; xx += 4) { ctx.beginPath(); ctx.arc(xx, yy, 1, 0, 7); ctx.fill(); }
+  }
+  // head + helmet
+  ctx.fillStyle = "#e0b48e";
+  ctx.beginPath(); ctx.arc(0, -44, 5.5, 0, 7); ctx.fill();
+  ctx.fillStyle = pig.trim;
+  ctx.beginPath(); ctx.arc(0, -45, 6, Math.PI, 0); ctx.fill();
+  if (enemy.maxArmor > 0) ctx.fillRect(-6, -45, 12, 3); // face guard for the armored
+
+  // sword arm (raised while knocking at the wall)
+  ctx.strokeStyle = "#2f2a24";
+  ctx.lineWidth = 2.6;
+  const armAng = knockLunge > 0 ? -1.9 + knockLunge * 0.9 : -0.5 + Math.sin(enemy.phase) * 0.2;
+  const ax = -8 + Math.cos(Math.PI + armAng) * -10, ay = -33 + Math.sin(Math.PI + armAng) * -10;
+  ctx.beginPath(); ctx.moveTo(-6, -33); ctx.lineTo(ax, ay); ctx.stroke();
+  ctx.strokeStyle = "#aeb4bd";
+  ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(ax - 9, ay - 7); ctx.stroke();
+
+  // heater shield charged with a gold fleur-de-lis; the shield bearer's is greater
+  const big = enemy.id === "shieldBearer";
+  const sx = 1, sw = big ? 13 : 10, sh = big ? 20 : 15.5, sy = big ? -37 : -35;
+  ctx.fillStyle = "#2b4a9b";
+  ctx.strokeStyle = "#1d3468";
+  ctx.lineWidth = 1.4;
   ctx.beginPath();
-  ctx.moveTo(x + 46, y - 15);
-  ctx.lineTo(x + 20, y + 20);
-  ctx.lineTo(x + 46, y + 55);
-  ctx.stroke();
+  ctx.moveTo(sx, sy); ctx.lineTo(sx + sw, sy); ctx.lineTo(sx + sw, sy + sh * 0.52);
+  ctx.quadraticCurveTo(sx + sw, sy + sh * 0.86, sx + sw / 2, sy + sh);
+  ctx.quadraticCurveTo(sx, sy + sh * 0.86, sx, sy + sh * 0.52);
+  ctx.closePath(); ctx.fill(); ctx.stroke();
+  fleurDeLis(sx + sw / 2, sy + sh * 0.42, big ? 5.4 : 4.4, "#e8c33a");
+
+  // the banner captain flies his own pennon
+  if (enemy.id === "bannerCaptain") {
+    ctx.strokeStyle = "#5a5245";
+    ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(-10, -18); ctx.lineTo(-10, -62); ctx.stroke();
+    ctx.fillStyle = pig.body;
+    ctx.beginPath(); ctx.moveTo(-10, -62); ctx.lineTo(-30, -57); ctx.lineTo(-10, -52); ctx.closePath(); ctx.fill();
+    ctx.strokeStyle = pig.trim; ctx.lineWidth = 1; ctx.stroke();
+  }
+  // the siege enemy shoulders a ram
+  if (enemy.id === "siegeEnemy") {
+    ctx.strokeStyle = "#6b4a2a";
+    ctx.lineWidth = 5;
+    ctx.beginPath(); ctx.moveTo(-16, -30); ctx.lineTo(16, -26); ctx.stroke();
+    ctx.strokeStyle = "#4a3018";
+    ctx.lineWidth = 1.4;
+    ctx.beginPath(); ctx.moveTo(-16, -30); ctx.lineTo(16, -26); ctx.stroke();
+  }
+  // champion's gold plume
+  if (enemy.id === "boss") {
+    ctx.strokeStyle = "#c8a23a";
+    ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(0, -51); ctx.quadraticCurveTo(7, -59, 13, -54); ctx.stroke();
+  }
 }
 
 function drawEnemy(enemy) {
-  const type = ENEMY_TYPES.find((item) => item.id === enemy.id);
-  const scale = enemy.id === "boss" ? 1.45 : 1;
-  const alpha = enemy.dyingTimer > 0 ? Math.max(0.2, enemy.dyingTimer / 0.45) : 1;
+  const scale = enemy.id === "boss" ? 1.55 : enemy.id === "brute" ? 1.2 : enemy.id === "swarm" ? 0.85 : 1;
   ctx.save();
-  ctx.globalAlpha = alpha;
-  ctx.translate(enemy.x, GROUND + enemy.laneOffset);
-  ctx.scale(scale, scale);
-  ctx.fillStyle = type?.color ?? "#64748B";
-  ctx.strokeStyle = "#1F2937";
-  ctx.lineWidth = 2;
-  drawRoundRect(-14, -58, 28, 42, 6);
-  ctx.fill();
-  ctx.stroke();
-  ctx.fillStyle = "#F8CFAE";
-  ctx.beginPath();
-  ctx.arc(0, -70, 10, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.fillStyle = "#334155";
-  ctx.fillRect(-12, -78, 24, 8);
+  const knocking = enemy.dyingTimer <= 0 && enemy.alive && enemy.x <= STOP_X;
+  const knockLunge = knocking ? Math.abs(Math.sin(enemy.attackTimer / 1.2 * Math.PI)) : 0;
+  ctx.translate(enemy.x - knockLunge * 7, GROUND + enemy.laneOffset * 0.4);
 
-  ctx.strokeStyle = "#1F2937";
-  ctx.lineWidth = 3;
-  ctx.beginPath();
-  ctx.moveTo(-6, -17);
-  ctx.lineTo(-16 + Math.sin(enemy.phase) * 4, 0);
-  ctx.moveTo(6, -17);
-  ctx.lineTo(18 - Math.sin(enemy.phase) * 4, 0);
-  ctx.stroke();
-
-  ctx.fillStyle = "#1D4ED8";
-  ctx.beginPath();
-  ctx.moveTo(8, -54);
-  ctx.lineTo(26, -50);
-  ctx.lineTo(22, -28);
-  ctx.lineTo(10, -20);
-  ctx.closePath();
-  ctx.fill();
-  ctx.fillStyle = "#FACC15";
-  ctx.font = "bold 14px Georgia";
-  ctx.textAlign = "center";
-  ctx.fillText("⚜", 17, -34);
-
-  const hpWidth = 40;
-  ctx.fillStyle = "rgba(15,23,42,.35)";
-  ctx.fillRect(-hpWidth / 2, -100, hpWidth, 6);
-  ctx.fillStyle = "#EF4444";
-  ctx.fillRect(-hpWidth / 2, -100, hpWidth * Math.max(0, enemy.hp / enemy.maxHp), 6);
-  for (let i = 0; i < enemy.maxArmor; i += 1) {
-    ctx.fillStyle = i < enemy.armor ? "#93C5FD" : "rgba(15,23,42,.25)";
-    ctx.fillRect(-enemy.maxArmor * 4 + i * 8, -91, 6, 6);
+  if (enemy.dyingTimer > 0) {
+    const k = 1 - enemy.dyingTimer / 0.45;
+    ctx.globalAlpha = Math.max(0, 1 - k * 1.15);
+    ctx.rotate(k * 1.5); // topple backward
   }
+  ctx.scale(scale, scale);
+  drawEnemyFigure(enemy, knockLunge);
+
+  if (enemy.dyingTimer <= 0 && enemy.id !== "boss") {
+    // HP pips in dried vermilion; a thin bar for the great-of-heart
+    if (enemy.maxHp <= 6) {
+      for (let i = 0; i < enemy.maxHp; i++) {
+        ctx.fillStyle = i < Math.ceil(enemy.hp) ? "#c0392b" : "rgba(0,0,0,0.25)";
+        ctx.fillRect(-enemy.maxHp * 3.5 + i * 7, -60, 5, 5);
+      }
+    } else {
+      ctx.fillStyle = "rgba(0,0,0,0.3)";
+      ctx.fillRect(-16, -60, 32, 5);
+      ctx.fillStyle = "#c0392b";
+      ctx.fillRect(-16, -60, 32 * Math.max(0, enemy.hp / enemy.maxHp), 5);
+    }
+    // armor pips as steel lozenges
+    for (let i = 0; i < enemy.maxArmor; i += 1) {
+      ctx.save();
+      ctx.translate(-enemy.maxArmor * 4 + i * 8 + 3, -66);
+      ctx.rotate(Math.PI / 4);
+      ctx.fillStyle = i < enemy.armor ? "#aab6c4" : "rgba(0,0,0,0.18)";
+      ctx.fillRect(-2.6, -2.6, 5.2, 5.2);
+      ctx.strokeStyle = "rgba(47,42,36,0.6)";
+      ctx.lineWidth = 0.8;
+      ctx.strokeRect(-2.6, -2.6, 5.2, 5.2);
+      ctx.restore();
+    }
+  }
+  // status marks — a lick of flame, a rime of frost
   if (enemy.statuses.burning.active) {
-    ctx.fillStyle = "#F97316";
+    ctx.fillStyle = VERMILION;
     ctx.beginPath();
-    ctx.arc(0, -112, 5, 0, Math.PI * 2);
+    ctx.moveTo(0, -80); ctx.quadraticCurveTo(5, -72, 0, -66); ctx.quadraticCurveTo(-5, -72, 0, -80);
     ctx.fill();
+    ctx.fillStyle = "#e8c33a";
+    ctx.beginPath(); ctx.arc(0, -70, 2, 0, 7); ctx.fill();
+  }
+  if (enemy.statuses.slow.active) {
+    ctx.strokeStyle = "#4a7f9b";
+    ctx.lineWidth = 1.4;
+    for (let i = 0; i < 3; i++) {
+      const a = i / 3 * Math.PI;
+      ctx.beginPath();
+      ctx.moveTo(-12 - Math.cos(a) * 4, -30 - Math.sin(a) * 4);
+      ctx.lineTo(-12 + Math.cos(a) * 4, -30 + Math.sin(a) * 4);
+      ctx.stroke();
+    }
   }
   ctx.restore();
 }
@@ -545,204 +940,434 @@ function drawArrows() {
     ctx.save();
     ctx.translate(x, y);
     ctx.rotate(Math.atan2(arrow.ty - arrow.y, arrow.tx - arrow.x));
-    ctx.strokeStyle = arrow.arrowId === "fire" ? "#EA580C" : arrow.arrowId === "piercing" ? "#2563EB" : "#6B3F1D";
-    ctx.lineWidth = 3;
-    ctx.beginPath();
-    ctx.moveTo(-18, 0);
-    ctx.lineTo(12, 0);
-    ctx.stroke();
-    ctx.fillStyle = "#CBD5E1";
-    ctx.beginPath();
-    ctx.moveTo(14, 0);
-    ctx.lineTo(6, -5);
-    ctx.lineTo(6, 5);
-    ctx.closePath();
-    ctx.fill();
+    ctx.strokeStyle = ARROW_TINTS[arrow.arrowId] ?? "#5b4325";
+    ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(-14, 0); ctx.lineTo(2, 0); ctx.stroke();
+    ctx.fillStyle = "#c9cdd4";
+    ctx.beginPath(); ctx.moveTo(4, 0); ctx.lineTo(-1, -2.8); ctx.lineTo(-1, 2.8); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = "#e8e0d0";
+    ctx.beginPath(); ctx.moveTo(-14, 0); ctx.lineTo(-11, -3); ctx.lineTo(-8, 0); ctx.lineTo(-11, 3); ctx.closePath(); ctx.fill();
+    if (arrow.arrowId === "fire") {
+      ctx.fillStyle = "rgba(163,48,29,0.8)";
+      ctx.beginPath(); ctx.arc(3, 0, 3, 0, 7); ctx.fill();
+    }
     ctx.restore();
   }
 }
 
-function drawPanels() {
-  const mode = app.model.mode;
-  const wordJitter = app.shakeTimer > 0 ? Math.sin(app.shakeTimer * 60) * 4 : 0;
-  panel(292 + wordJitter, 28, 516, 96, mode === "combat" ? "rgba(255,251,235,.94)" : "rgba(248,250,252,.82)");
-  ctx.textAlign = "center";
-  ctx.font = "bold 36px Georgia";
-  drawTypedText(app.combatWord, app.wordInput, 550 + wordJitter, 75, mode === "combat");
-  ctx.font = "14px Georgia";
-  ctx.fillStyle = "#475569";
-  ctx.fillText("Combat word · SPACE fires", 550 + wordJitter, 108);
-
-  panel(262, 132, 576, 70, mode === "enrichment" ? "rgba(236,253,245,.95)" : "rgba(248,250,252,.80)");
-  ctx.font = "bold 22px Georgia";
-  drawTypedText(app.model.enrichmentPhrase, app.model.enrichmentInput, 550, 162, mode === "enrichment");
-  ctx.font = "13px Georgia";
-  ctx.fillStyle = "#475569";
-  ctx.fillText("TAB switches lanes · phrase progress is saved", 550, 188);
-}
-
-function drawTypedText(target, typed, x, y, active) {
+// letters colored by typing state, with caret and overtype tail
+function drawTypedText(target, typed, cx, y, opts) {
+  const { active, font, caret } = opts;
+  ctx.font = font;
   ctx.textAlign = "left";
+  ctx.textBaseline = "middle";
   const chars = [...target];
-  const widths = chars.map((char) => ctx.measureText(char).width + 2);
+  const widths = chars.map((char) => ctx.measureText(char).width + 3);
   const total = widths.reduce((sum, width) => sum + width, 0);
-  let cursor = x - total / 2;
+  let x = cx - total / 2;
   for (let i = 0; i < chars.length; i += 1) {
-    if (i < typed.length) ctx.fillStyle = typed[i] === chars[i] ? "#15803D" : "#B91C1C";
-    else ctx.fillStyle = active ? "#1E293B" : "#64748B";
-    ctx.fillText(chars[i], cursor, y);
-    cursor += widths[i];
+    if (i < typed.length) ctx.fillStyle = typed[i] === chars[i] ? "#2e7d32" : "#c0392b";
+    else ctx.fillStyle = active ? "#3d3629" : "rgba(61,54,41,0.45)";
+    ctx.fillText(chars[i], x, y);
+    if (caret && active && i === typed.length) {
+      ctx.fillStyle = "rgba(61,54,41,0.75)";
+      ctx.fillRect(x - 1, y + 14, widths[i] - 3, 2.6);
+    }
+    x += widths[i];
+  }
+  const extra = typed.slice(chars.length);
+  if (extra) {
+    ctx.fillStyle = "#c0392b";
+    ctx.font = font.replace(/\d+px/, (m) => Math.round(parseInt(m) * 0.62) + "px");
+    ctx.fillText(extra, x + 4, y + 2);
   }
   ctx.textAlign = "center";
+  ctx.textBaseline = "alphabetic";
+}
+
+// parchment cartouche with ink rule and gilt inner border
+function cartouche(x, y, w, h, active, glow) {
+  ctx.save();
+  ctx.globalAlpha = active ? 1 : 0.62;
+  ctx.fillStyle = "rgba(244,235,210,0.96)";
+  if (glow) { ctx.shadowColor = "rgba(201,162,39,0.85)"; ctx.shadowBlur = 16; }
+  rr(x, y, w, h, 8); ctx.fill();
+  ctx.shadowBlur = 0;
+  ctx.strokeStyle = INK; ctx.lineWidth = 2;
+  rr(x, y, w, h, 8); ctx.stroke();
+  ctx.strokeStyle = glow ? giltFill(x, y, x + w, y + h) : "rgba(140,110,50,0.7)";
+  ctx.lineWidth = glow ? 3 : 1.6;
+  rr(x + 5, y + 5, w - 10, h - 10, 5); ctx.stroke();
+  ctx.restore();
+}
+
+function drawPanels() {
+  const mode = app.model.mode;
+  const jitter = app.shakeTimer > 0 ? Math.sin(app.shakeTimer * 60) * 5 : 0;
+  const cx = W / 2 + jitter;
+  const combatReady = app.wordInput === app.combatWord && app.combatWord.length > 0;
+
+  // combat cartouche
+  ctx.font = "bold 38px " + BODY;
+  const wordW = Math.max(280, [...app.combatWord].reduce((s, ch) => s + ctx.measureText(ch).width + 3, 0) + 90);
+  cartouche(cx - wordW / 2, 22, wordW, 62, mode === "combat", mode === "combat" && combatReady);
+  drawTypedText(app.combatWord, app.wordInput, cx, 54, { active: mode === "combat", font: "bold 38px " + BODY, caret: !combatReady });
+
+  // enrichment cartouche
+  ctx.font = "600 21px " + BODY;
+  const phraseW = Math.max(360, [...app.model.enrichmentPhrase].reduce((s, ch) => s + ctx.measureText(ch).width + 3, 0) + 80);
+  cartouche(W / 2 - phraseW / 2, 96, phraseW, 46, mode === "enrichment", false);
+  drawTypedText(app.model.enrichmentPhrase, app.model.enrichmentInput, W / 2, 119, { active: mode === "enrichment", font: "600 21px " + BODY, caret: true });
+  const phraseEntry = ENRICHMENT_PHRASES.find((entry) => entry.phrase === app.model.enrichmentPhrase);
+  if (phraseEntry) {
+    ctx.font = "italic 12px " + BODY;
+    ctx.fillStyle = "rgba(122,92,20,0.9)";
+    ctx.textAlign = "left";
+    ctx.fillText("+" + phraseEntry.reward + " TP", W / 2 + phraseW / 2 + 8, 121);
+    ctx.textAlign = "center";
+  }
+
+  // guidance line, in the scribe's italic hand
+  ctx.font = "italic 15px " + BODY;
+  if (mode === "combat" && combatReady) {
+    const pulse = 0.6 + 0.4 * Math.sin(performance.now() / 160);
+    ctx.fillStyle = "rgba(140,100,20," + pulse.toFixed(2) + ")";
+    ctx.fillText("press SPACE to loose the arrow", cx, 162);
+  } else if (mode === "combat") {
+    ctx.fillStyle = "rgba(70,60,45,0.75)";
+    ctx.fillText("type the combat word · TAB to train for Training Points", cx, 162);
+  } else {
+    ctx.fillStyle = "rgba(70,60,45,0.75)";
+    ctx.fillText("the foe still marches — TAB returns to the fight · progress is kept", W / 2, 162);
+  }
 }
 
 function drawHUD() {
-  panel(16, 16, 238, 128, "rgba(248,250,252,.88)");
-  ctx.textAlign = "left";
-  ctx.fillStyle = "#0F172A";
-  ctx.font = "bold 18px Georgia";
-  ctx.fillText(`Level ${app.model.level}/100 · Tier ${getLevelTier(app.model.level)}`, 32, 44);
-  ctx.font = "15px Georgia";
-  ctx.fillText(`Gold ${app.model.gold} · TP ${app.model.trainingPoints}`, 32, 70);
-  ctx.fillText(`Tower ${app.model.towerHp}/${app.model.towerMaxHp}`, 32, 94);
-  ctx.fillText(`Enemies ${app.defeatedThisLevel}/${app.levelQuota}`, 32, 118);
-
-  panel(W - 294, 16, 278, 128, "rgba(248,250,252,.88)");
-  ctx.textAlign = "left";
-  ctx.fillStyle = "#0F172A";
-  ctx.font = "bold 16px Georgia";
-  ctx.fillText(app.model.activeWeaponName, W - 278, 44);
-  ctx.font = "14px Georgia";
-  ctx.fillStyle = "#0F172A";
-  ctx.fillText(`Arrow Charge ${app.model.arrowCharge}`, W - 278, 70);
   const tier = getLevelTier(app.model.level);
-  let x = W - 278;
-  for (const arrow of ARROW_TYPES.filter((item) => ["1", "2", "3"].includes(item.key))) {
-    const unlocked = arrow.unlockTier <= tier;
+  ctx.textAlign = "right";
+  ctx.fillStyle = "#2e2a22";
+  ctx.font = "bold 18px " + BODY;
+  ctx.fillText("Level " + app.model.level + " / 100 · Tier " + tier, W - 32, 44);
+  ctx.fillStyle = "#7a5c14";
+  ctx.font = "bold 16px " + BODY;
+  ctx.fillText("Gold " + app.model.gold, W - 32, 66);
+  ctx.fillStyle = "#2e6b3a";
+  ctx.fillText("Training " + app.model.trainingPoints, W - 32, 86);
+  ctx.fillStyle = "#2e2a22";
+  ctx.font = "14px " + BODY;
+  ctx.fillText("Arrow Charge " + app.model.arrowCharge, W - 32, 106);
+  ctx.fillText("Foes " + app.defeatedThisLevel + " / " + app.levelQuota, W - 32, 124);
+
+  // the quiver — arrow chips on the sward, gilt for the arrow in hand
+  const unlockedIds = getUnlockedArrowIds(tier);
+  const slots = ARROW_TYPES.filter((arrow) => /^[1-6]$/.test(arrow.key))
+    .filter((arrow) => Number(arrow.key) <= 3 || unlockedIds.includes(arrow.id));
+  let x = 24;
+  const y = GROUND + 26;
+  for (const arrow of slots) {
+    const unlocked = unlockedIds.includes(arrow.id);
     const active = app.model.activeArrowId === arrow.id;
-    ctx.fillStyle = active ? "#1D4ED8" : unlocked ? "#E2E8F0" : "#CBD5E1";
-    drawRoundRect(x, 92, 78, 30, 6);
-    ctx.fill();
-    ctx.fillStyle = active ? "#FFFFFF" : unlocked ? "#0F172A" : "#64748B";
-    ctx.font = "bold 12px Georgia";
+    ctx.save();
+    ctx.globalAlpha = unlocked ? 1 : 0.45;
+    ctx.fillStyle = active ? giltFill(x, y, x + 92, y + 30) : "rgba(244,235,210,0.92)";
+    rr(x, y, 92, 30, 5); ctx.fill();
+    ctx.strokeStyle = active ? INK : "rgba(42,28,14,0.65)";
+    ctx.lineWidth = active ? 2 : 1.2;
+    rr(x, y, 92, 30, 5); ctx.stroke();
+    ctx.fillStyle = active ? "#2a1c0e" : unlocked ? "#3d3629" : "rgba(61,54,41,0.8)";
+    ctx.font = (active ? "bold " : "") + "13px " + BODY;
     ctx.textAlign = "center";
-    ctx.fillText(`${arrow.key} ${arrow.name.split(" ")[0]}`, x + 39, 112);
-    x += 86;
+    ctx.fillText(arrow.key + " · " + (unlocked ? arrow.name.split(" ")[0] : "Tier " + arrow.unlockTier), x + 46, y + 19);
+    ctx.restore();
+    x += 100;
   }
+  // the bowman's weapon, noted beneath
+  ctx.textAlign = "left";
+  ctx.font = "italic 14px " + BODY;
+  ctx.fillStyle = "rgba(46,42,34,0.8)";
+  ctx.fillText(app.model.activeWeaponName + " · draw ×" + getWeaponDamage(app.model.longbowmanTier).toFixed(2).replace(/\.?0+$/, ""), 26, y + 52);
+
+  ctx.font = "11px " + BODY;
+  ctx.fillStyle = "rgba(46,42,34,0.55)";
+  ctx.textAlign = "right";
+  ctx.fillText("seed " + app.rngSeed, W - 14, H - 22);
+  ctx.textAlign = "center";
+}
+
+function drawBossBar() {
+  const b = app.enemies.find((enemy) => enemy.id === "boss" && enemy.alive && enemy.dyingTimer <= 0);
+  if (!b) return;
+  const bw = 320, bx = W / 2 - bw / 2, by = 196;
+  ctx.textAlign = "center";
+  ctx.font = "bold 15px " + BODY;
+  ctx.fillStyle = "#7a1420";
+  ctx.fillText(b.name, W / 2, by - 6);
+  ctx.fillStyle = "rgba(0,0,0,0.35)";
+  rr(bx, by, bw, 12, 6); ctx.fill();
+  const frac = Math.max(0, b.hp / b.maxHp);
+  ctx.fillStyle = "#a02030";
+  if (frac > 0) { rr(bx + 1.5, by + 1.5, Math.max(4, (bw - 3) * frac), 9, 4.5); ctx.fill(); }
 }
 
 function drawMessage() {
   if (app.messageTimer <= 0) return;
   ctx.save();
   ctx.globalAlpha = Math.min(1, app.messageTimer);
-  ctx.fillStyle = "rgba(15,23,42,.86)";
-  ctx.font = "bold 22px Georgia";
+  ctx.fillStyle = "rgba(40,34,24,0.82)";
+  ctx.font = "bold 24px " + BODY;
   ctx.textAlign = "center";
   const width = Math.max(280, ctx.measureText(app.message).width + 52);
-  drawRoundRect(W / 2 - width / 2, 216, width, 48, 8);
+  rr(W / 2 - width / 2, 224, width, 46, 10);
   ctx.fill();
-  ctx.fillStyle = "#F8FAFC";
-  ctx.fillText(app.message, W / 2, 247);
+  ctx.fillStyle = "#f3e9c9";
+  ctx.fillText(app.message, W / 2, 255);
   ctx.restore();
+}
+
+function drawPageBorder() {
+  // foxed-edge vignette so the leaf darkens toward its margins
+  const v = ctx.createRadialGradient(W / 2, H / 2, H * 0.34, W / 2, H / 2, H * 0.86);
+  v.addColorStop(0, "rgba(60,40,16,0)");
+  v.addColorStop(1, "rgba(44,28,10,0.30)");
+  ctx.fillStyle = v;
+  ctx.fillRect(0, 0, W, H);
+
+  // illuminated margin — ink rule / gilt band / hairline
+  const m = 13;
+  ctx.strokeStyle = INK; ctx.lineWidth = 2;
+  ctx.strokeRect(m, m, W - 2 * m, H - 2 * m);
+  ctx.strokeStyle = giltFill(0, 0, W, H); ctx.lineWidth = 4;
+  ctx.strokeRect(m + 5, m + 5, W - 2 * m - 10, H - 2 * m - 10);
+  ctx.strokeStyle = "rgba(42,28,14,0.7)"; ctx.lineWidth = 1;
+  ctx.strokeRect(m + 9, m + 9, W - 2 * m - 18, H - 2 * m - 18);
+
+  // gilt corner lozenges
+  const cs = [[m + 5, m + 5], [W - m - 5, m + 5], [m + 5, H - m - 5], [W - m - 5, H - m - 5]];
+  for (const c of cs) {
+    ctx.save();
+    ctx.translate(c[0], c[1]); ctx.rotate(Math.PI / 4);
+    ctx.fillStyle = giltFill(-7, -7, 7, 7);
+    ctx.fillRect(-6, -6, 12, 12);
+    ctx.strokeStyle = INK; ctx.lineWidth = 1.4;
+    ctx.strokeRect(-6, -6, 12, 12);
+    ctx.restore();
+  }
+}
+
+function drawOverlay(title, lines, footer) {
+  // dim the field, then lay a fresh vellum leaf over it
+  ctx.fillStyle = "rgba(30,20,10,0.55)";
+  ctx.fillRect(0, 0, W, H);
+  const px = 60, py = 34, pw = W - 120, ph = H - 68;
+  const pg = ctx.createLinearGradient(0, py, 0, py + ph);
+  pg.addColorStop(0, PARCH_HI); pg.addColorStop(1, PARCH_DK);
+  ctx.fillStyle = pg;
+  rr(px, py, pw, ph, 6); ctx.fill();
+  ctx.strokeStyle = INK; ctx.lineWidth = 2;
+  rr(px, py, pw, ph, 6); ctx.stroke();
+  ctx.strokeStyle = giltFill(px, py, px + pw, py + ph); ctx.lineWidth = 3;
+  rr(px + 6, py + 6, pw - 12, ph - 12, 4); ctx.stroke();
+
+  ctx.textAlign = "center";
+  // blackletter title in gold leaf with an ink shadow
+  ctx.font = "68px " + DISPLAY;
+  ctx.fillStyle = "rgba(40,26,12,0.35)";
+  ctx.fillText(title, W / 2 + 2, 136);
+  ctx.fillStyle = giltFill(W / 2 - 220, 80, W / 2 + 220, 146);
+  ctx.fillText(title, W / 2, 134);
+  ctx.strokeStyle = "rgba(60,40,14,0.7)"; ctx.lineWidth = 1;
+  ctx.strokeText(title, W / 2, 134);
+  // gilt rule beneath the title
+  ctx.strokeStyle = giltFill(W / 2 - 170, 0, W / 2 + 170, 0); ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.moveTo(W / 2 - 170, 156); ctx.lineTo(W / 2 + 170, 156); ctx.stroke();
+
+  ctx.fillStyle = "#3a2a16";
+  ctx.font = "19px " + BODY;
+  let y = 198;
+  for (const line of lines) { ctx.fillText(line, W / 2, y); y += 30; }
+
+  const pulse = 0.55 + 0.45 * Math.sin(performance.now() / 300);
+  ctx.fillStyle = "rgba(163,48,29," + pulse.toFixed(2) + ")";
+  ctx.font = "bold 22px " + BODY;
+  ctx.fillText(footer, W / 2, H - 74);
+}
+
+function drawLegend(y) {
+  const entries = [
+    { id: "grunt", note: "from Level 1" },
+    { id: "runner", note: "from Level 11" },
+    { id: "chainmailGuard", note: "from Level 21" },
+    { id: "shieldBearer", note: "from Level 31" },
+  ];
+  ctx.font = "14px " + BODY;
+  ctx.textAlign = "center";
+  const spacing = 190;
+  let x = W / 2 - spacing * 1.5;
+  for (const entry of entries) {
+    const type = ENEMY_TYPES.find((item) => item.id === entry.id);
+    const dummy = { id: entry.id, phase: 0.8, maxArmor: type.armor, statuses: null };
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.scale(0.9, 0.9);
+    drawEnemyFigure(dummy, 0);
+    ctx.restore();
+    ctx.fillStyle = "#33240f";
+    ctx.fillText(type.name, x, y + 22);
+    ctx.fillStyle = "rgba(70,52,26,0.7)";
+    ctx.fillText(type.armor > 0 ? type.armor + " armor · " + entry.note : entry.note, x, y + 40);
+    x += spacing;
+  }
+}
+
+function shopRow(y, key, label, preview, note, pips, affordable, blockedNote) {
+  const px = W / 2 - 330;
+  ctx.textAlign = "left";
+  // the ware's number, set as a rubric
+  ctx.font = "bold 22px " + BODY;
+  ctx.fillStyle = affordable ? "#7a1420" : "rgba(122,20,32,0.45)";
+  ctx.fillText(key, px + 26, y);
+  ctx.fillStyle = affordable ? "#3d3629" : "rgba(61,54,41,0.5)";
+  ctx.fillText(label, px + 52, y);
+  if (pips) {
+    for (let i = 0; i < pips.max; i++) {
+      ctx.fillStyle = i < pips.rank ? "#7a5c14" : "rgba(0,0,0,0.18)";
+      ctx.beginPath(); ctx.arc(px + 268 + i * 13, y - 7, 4.2, 0, 7); ctx.fill();
+    }
+  }
+  ctx.textAlign = "right";
+  ctx.font = "bold 17px " + BODY;
+  if (blockedNote) { ctx.fillStyle = "rgba(61,54,41,0.5)"; ctx.fillText(blockedNote, W / 2 + 300, y); }
+  else if (!preview) { ctx.fillStyle = "rgba(61,54,41,0.5)"; ctx.fillText("MAX", W / 2 + 300, y); }
+  else {
+    const cost = preview.goldCost + "g" + (preview.trainingPointCost ? " + " + preview.trainingPointCost + " TP" : "");
+    ctx.fillStyle = affordable ? "#7a5c14" : "#b03a2e";
+    ctx.fillText(cost, W / 2 + 300, y);
+  }
+  ctx.textAlign = "left";
+  ctx.font = "italic 12.5px " + BODY;
+  ctx.fillStyle = "rgba(61,54,41,0.75)";
+  ctx.fillText(note, px + 52, y + 17);
 }
 
 function drawShop() {
   drawBackground();
-  ctx.fillStyle = "rgba(15,23,42,.72)";
-  ctx.fillRect(0, 0, W, H);
-  panel(170, 76, 760, 486, "rgba(255,251,235,.96)");
-  ctx.textAlign = "center";
-  ctx.fillStyle = "#1E293B";
-  ctx.font = "bold 42px Georgia";
-  ctx.fillText(`Level ${app.model.level} Cleared`, W / 2, 128);
-  ctx.font = "17px Georgia";
-  ctx.fillText(`Gold ${app.model.gold} · Training Points ${app.model.trainingPoints} · Arrow Charge ${app.model.arrowCharge}`, W / 2, 158);
-
-  const rows = [
-    ["1", "Tower Defense", getUpgradePreview(app.model, "tower"), "More HP, shield, repair, and damage reduction"],
-    ["2", "Longbowman", getUpgradePreview(app.model, "longbowman"), "Longbow → Silver Bow → Golden Bow → Fire Musket"],
-    ["3", "Special Arrows", getUpgradePreview(app.model, "arrowCharge"), "Refill +3 Arrow Charge for Fire and Piercing arrows"],
-    ["4", "Repair", getUpgradePreview(app.model, "repair"), "Recover tower HP between waves"],
-  ];
-  let y = 204;
-  for (const [key, label, preview, note] of rows) {
-    const affordable = preview && canAffordUpgrade(app.model, key === "1" ? "tower" : key === "2" ? "longbowman" : key === "3" ? "arrowCharge" : "repair");
-    ctx.fillStyle = affordable ? "#F8FAFC" : "#E5E7EB";
-    drawRoundRect(220, y - 26, 660, 58, 6);
-    ctx.fill();
-    ctx.fillStyle = affordable ? "#0F172A" : "#64748B";
-    ctx.font = "bold 18px Georgia";
-    ctx.textAlign = "left";
-    ctx.fillText(`${key}. ${label}`, 244, y);
-    ctx.font = "14px Georgia";
-    const cost = preview ? `${preview.goldCost}g${preview.trainingPointCost ? ` + ${preview.trainingPointCost} TP` : ""}` : "Maxed";
-    ctx.fillText(`${preview?.nextName ?? "Fully upgraded"} · ${cost}`, 244, y + 20);
-    ctx.textAlign = "right";
-    ctx.fillText(note, 858, y + 10);
-    y += 76;
-  }
-  ctx.textAlign = "center";
-  ctx.fillStyle = "#1E293B";
-  ctx.font = "bold 20px Georgia";
-  ctx.fillText("Press ENTER for the next level", W / 2, 522);
-  drawMessage();
-}
-
-function drawOverlay(title, lines, footer) {
-  drawBackground();
+  drawEnemyBanner();
   drawTower();
   drawArcher();
-  ctx.fillStyle = "rgba(15,23,42,.72)";
+  ctx.fillStyle = "rgba(30,20,10,0.6)";
   ctx.fillRect(0, 0, W, H);
-  panel(155, 86, 790, 454, "rgba(255,251,235,.96)");
+  const px = W / 2 - 340, pw = 680, py = 46, ph = H - 100;
+  const pg = ctx.createLinearGradient(0, py, 0, py + ph);
+  pg.addColorStop(0, PARCH_HI); pg.addColorStop(1, PARCH_DK);
+  ctx.fillStyle = pg;
+  ctx.strokeStyle = INK;
+  ctx.lineWidth = 2;
+  rr(px, py, pw, ph, 8); ctx.fill(); ctx.stroke();
+  ctx.strokeStyle = giltFill(px, py, px + pw, py + ph); ctx.lineWidth = 3;
+  rr(px + 6, py + 6, pw - 12, ph - 12, 5); ctx.stroke();
+
   ctx.textAlign = "center";
-  ctx.fillStyle = "#1E293B";
-  ctx.font = "bold 52px Georgia";
-  ctx.fillText(title, W / 2, 150);
-  ctx.font = "18px Georgia";
-  let y = 198;
-  for (const line of lines) {
-    ctx.fillText(line, W / 2, y);
-    y += 31;
-  }
-  ctx.font = "bold 22px Georgia";
-  ctx.fillText(footer, W / 2, 492);
+  let y = py + 46;
+  ctx.fillStyle = giltFill(W / 2 - 120, py + 12, W / 2 + 120, py + 52);
+  ctx.font = "40px " + DISPLAY;
+  ctx.fillText("The Armory", W / 2, y); y += 16;
+  ctx.strokeStyle = giltFill(W / 2 - 90, 0, W / 2 + 90, 0); ctx.lineWidth = 1.6;
+  ctx.beginPath(); ctx.moveTo(W / 2 - 90, y - 6); ctx.lineTo(W / 2 + 90, y - 6); ctx.stroke();
+  ctx.font = "italic 14px " + BODY;
+  ctx.fillStyle = "rgba(61,54,41,0.8)";
+  ctx.fillText("Level " + app.model.level + " is cleared — spend the war chest before the next assault", W / 2, y + 14);
+  y += 40;
+  ctx.font = "bold 16px " + BODY;
+  ctx.fillStyle = "#3d3629";
+  ctx.fillText(
+    "Gold " + app.model.gold + "   ·   Training " + app.model.trainingPoints +
+    "   ·   Arrow Charge " + app.model.arrowCharge +
+    "   ·   Tower " + app.model.towerHp + " / " + app.model.towerMaxHp,
+    W / 2, y);
+  y += 44;
+
+  const towerPreview = getUpgradePreview(app.model, "tower");
+  const bowPreview = getUpgradePreview(app.model, "longbowman");
+  shopRow(y, "1", "Tower Defense", towerPreview,
+    towerPreview ? "raise " + towerPreview.nextName + " — more walls, repair, and damage ward" : "the keep stands at its finest",
+    { rank: app.model.towerLevel, max: TOWER_LEVELS.length },
+    canAffordUpgrade(app.model, "tower"), null);
+  y += 56;
+  shopRow(y, "2", "Longbowman", bowPreview,
+    bowPreview ? "take up the " + bowPreview.nextName + " — a heavier draw for every arrow" : "the Fire Musket has no equal",
+    { rank: app.model.longbowmanTier, max: 6 },
+    canAffordUpgrade(app.model, "longbowman"), null);
+  y += 56;
+  shopRow(y, "3", "Special Arrows", getUpgradePreview(app.model, "arrowCharge"),
+    "+3 Arrow Charge for Fire and Piercing shafts",
+    null, canAffordUpgrade(app.model, "arrowCharge"), null);
+  y += 56;
+  const wallsWhole = app.model.towerHp >= app.model.towerMaxHp;
+  shopRow(y, "4", "Repair", getUpgradePreview(app.model, "repair"),
+    wallsWhole ? "the walls are already whole" : "masons mend the walls, +60 HP",
+    null, canAffordUpgrade(app.model, "repair"), wallsWhole ? "walls whole" : null);
+  y += 48;
+
+  ctx.textAlign = "center";
+  const pulse = 0.55 + 0.45 * Math.sin(performance.now() / 300);
+  ctx.fillStyle = "rgba(163,48,29," + pulse.toFixed(2) + ")";
+  ctx.font = "bold 21px " + BODY;
+  ctx.fillText("press ENTER to march to Level " + (app.model.level + 1), W / 2, py + ph - 30);
+  drawMessage();
 }
 
 function draw() {
   if (app.screen === "shop") {
     drawShop();
+    drawPageBorder();
     return;
   }
   if (app.screen === "start") {
-    drawOverlay("LONGBOW TRAINING", [
-      "Type enemy words to fire. Press TAB to risk time on enrichment phrases.",
-      "1 Normal Arrow · 2 Fire Arrow · 3 Piercing Arrow.",
-      "Fire bypasses chainmail. Piercing punishes swarms.",
-      "Spend Gold and Training Points in the after-level shop.",
-    ], "Press ENTER to begin");
+    drawBackground();
+    drawEnemyBanner();
+    drawTower();
+    drawArcher();
+    drawOverlay("Longbow Training", [
+      "Type the combat word — SPACE looses an arrow at the nearest foe.",
+      "TAB turns to the training phrase: finish it for Training Points and Arrow Charge,",
+      "but the enemy keeps marching while you study.",
+      "1 Normal Arrow · 2 Fire Arrow burns through mail · 3 Piercing Arrow strikes three.",
+      "Spend Gold and Training Points in the armory after every level.",
+      "",
+    ], "press ENTER to begin the campaign");
+    drawLegend(430);
+    drawPageBorder();
     return;
   }
   if (app.screen === "gameover") {
-    drawOverlay("THE TOWER HAS FALLEN", [
-      `You reached Level ${app.model.level}.`,
-      `Gold ${app.model.gold} · Training Points ${app.model.trainingPoints}`,
+    drawBackground();
+    drawTower();
+    drawOverlay("The Tower Has Fallen", [
+      "The wall was breached at Level " + app.model.level + ".",
+      "",
+      "Gold " + app.model.gold + "   ·   Training Points " + app.model.trainingPoints,
       "The enemy kept moving while the training phrase waited.",
-    ], "Press ENTER to restart");
+    ], "press ENTER to muster a new campaign");
+    drawPageBorder();
     return;
   }
   if (app.screen === "victory") {
-    drawOverlay("THE KEEP STANDS", [
-      "You cleared all 100 levels.",
-      `Final Gold ${app.model.gold} · Training Points ${app.model.trainingPoints}`,
-      `Weapon: ${app.model.activeWeaponName} · Tower: ${TOWER_LEVELS[app.model.towerLevel - 1].name}`,
-    ], "Press ENTER to start a new campaign");
+    drawBackground();
+    drawTower();
+    drawOverlay("The Keep Stands", [
+      "All one hundred levels are cleared.",
+      "",
+      "Final Gold " + app.model.gold + "   ·   Training Points " + app.model.trainingPoints,
+      "Weapon: " + app.model.activeWeaponName + "   ·   Tower: " + TOWER_LEVELS[app.model.towerLevel - 1].name,
+    ], "press ENTER to start a new campaign");
+    drawPageBorder();
     return;
   }
 
   ctx.save();
   if (app.shakeTimer > 0) ctx.translate(Math.sin(app.shakeTimer * 70) * 3, 0);
   drawBackground();
+  drawEnemyBanner();
   drawTower();
   drawArcher();
   for (const enemy of app.enemies) drawEnemy(enemy);
@@ -755,29 +1380,34 @@ function draw() {
   }
   drawPanels();
   drawHUD();
+  drawBossBar();
   drawMessage();
   ctx.restore();
+  drawPageBorder();
 }
 
 function handleShopKey(key) {
   if (key === "Enter") {
     nextLevel();
-    return;
+    return true;
   }
-  if (key === "1") buy("tower");
-  if (key === "2") buy("longbowman");
-  if (key === "3") buy("arrowCharge");
-  if (key === "4") buy("repair");
+  if (key === "1") { buy("tower"); return true; }
+  if (key === "2") { buy("longbowman"); return true; }
+  if (key === "3") { buy("arrowCharge"); return true; }
+  if (key === "4") { buy("repair"); return true; }
+  return false;
 }
 
 window.addEventListener("keydown", (event) => {
+  if (event.metaKey || event.ctrlKey || event.altKey) return; // leave browser shortcuts alone
+  if (AC && AC.state === "suspended") AC.resume();
+
   if (app.screen === "start" || app.screen === "gameover" || app.screen === "victory") {
     if (event.key === "Enter") startCampaign();
     return;
   }
   if (app.screen === "shop") {
-    event.preventDefault();
-    handleShopKey(event.key);
+    if (handleShopKey(event.key)) event.preventDefault();
     return;
   }
   if (event.key === "Tab") {
@@ -851,7 +1481,7 @@ window.render_game_to_text = () => JSON.stringify({
   },
   enemies: livingEnemies().map((enemy) => ({
     id: enemy.id,
-    name: enemyNameById.get(enemy.id),
+    name: enemy.name,
     x: Math.round(enemy.x),
     hp: Number(enemy.hp.toFixed(2)),
     armor: enemy.armor,

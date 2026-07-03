@@ -1,7 +1,9 @@
 # Longbow Training — Typing Defense
 
 A keyboard-only typing defense game built around the enrichment plan in
-`outputs/typing_tower_enrichment_plan.xlsx`.
+`outputs/typing_tower_enrichment_plan.xlsx`, drawn as an illuminated
+manuscript: vellum, ink, gold leaf, and heraldic pigments, with blackletter
+titles set in UnifrakturMaguntia and body text in EB Garamond.
 
 You defend a tower with a longbowman while enemies advance from the right. Type
 combat words to fire arrows, then risk switching to enrichment phrases for
@@ -28,8 +30,14 @@ Then open `http://localhost:8000`.
 | Backspace | delete the last typed character |
 | Tab | switch between combat word and enrichment phrase |
 | 1 | Normal Arrow |
-| 2 | Fire Arrow, once unlocked |
-| 3 | Piercing Arrow, once unlocked |
+| 2 | Fire Arrow, once unlocked (Tier 2) |
+| 3 | Piercing Arrow, once unlocked (Tier 3) |
+| 4 | Ice Arrow, once unlocked (Tier 4) |
+| 5 | Armor Breaker, once unlocked (Tier 5) |
+| 6 | Explosive Arrow, once unlocked (Tier 6) |
+| 1–4 in the shop | buy the numbered ware |
+
+Shortcuts held with Cmd/Ctrl/Alt are left to the browser.
 
 ## Implemented systems
 
@@ -39,10 +47,15 @@ Then open `http://localhost:8000`.
 - Chainmail-style armor points: normal arrows chip armor before damaging HP.
 - Fire arrows bypass armor and apply burn damage.
 - Piercing arrows hit several front-line enemies.
-- After-level shop for tower upgrades, longbowman weapon progression, repairs,
-  and special arrow refills.
+- Ice arrows slow, Armor Breakers crack plate, Explosive arrows splash within
+  their blast radius — each surfaces in the quiver HUD as its tier unlocks.
+- After-level shop for tower upgrades, longbowman weapon progression, repairs
+  (refused while the walls are whole), and special arrow refills.
 - Tower path from Wooden Watchtower to Dragonstone Keep.
 - Longbowman path from Longbow through Silver/Golden Bow to Fire Musket.
+- Illuminated-manuscript presentation: vellum page, gilt borders and corner
+  lozenges, St George's cross over the tower, fleur-de-lis heater shields,
+  and a small WebAudio synth for arrows, coins, horns, and typing.
 - Browser playtest hooks: `window.render_game_to_text()` and
   `window.advanceTime(ms)`.
 
@@ -50,5 +63,5 @@ Then open `http://localhost:8000`.
 
 ```bash
 npm test
-node work/playtest.mjs
+node work/playtest.mjs   # requires playwright and a server on :8000
 ```

@@ -138,6 +138,7 @@ export function createGameModel(initial = {}) {
         this.combatInput += char;
         return;
       }
+      if (this.enrichmentInput.length >= this.enrichmentPhrase.length + 3) return;
       this.enrichmentInput += char;
       if (this.enrichmentInput === this.enrichmentPhrase) {
         const phrase = ENRICHMENT_PHRASES.find((entry) => entry.phrase === this.enrichmentPhrase);
@@ -172,6 +173,7 @@ export function getUpgradePreview(game, upgradeId) {
 export function canAffordUpgrade(game, upgradeId) {
   const preview = getUpgradePreview(game, upgradeId);
   if (!preview) return false;
+  if (upgradeId === "repair" && game.towerHp >= game.towerMaxHp) return false;
   return game.gold >= preview.goldCost && game.trainingPoints >= preview.trainingPointCost;
 }
 

@@ -4,24 +4,32 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Longbow Training — Typing Defense</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=UnifrakturMaguntia&family=EB+Garamond:ital,wght@0,400;0,500;0,600;0,700;1,400;1,500&display=swap" rel="stylesheet">
 <style>
   html, body {
-    margin: 0;
-    height: 100%;
-    background: #101827;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-family: Georgia, "Times New Roman", serif;
+    margin: 0; height: 100%;
+    /* aged tooled-leather book cover the illuminated page rests on */
+    background:
+      radial-gradient(120% 120% at 50% 12%, #4a3722 0%, #34251531 42%, transparent 70%),
+      radial-gradient(140% 100% at 50% 100%, #241811 0%, #1a1109 70%),
+      #241812;
+    display: flex; align-items: center; justify-content: center;
+    font-family: 'EB Garamond', Georgia, 'Times New Roman', serif;
     overflow: hidden;
   }
-
   canvas {
     width: min(98vw, calc(96vh * 5 / 3));
     aspect-ratio: 5 / 3;
-    border-radius: 8px;
-    box-shadow: 0 18px 54px rgba(0, 0, 0, .5);
-    background: #93c5fd;
+    border-radius: 3px;
+    /* gilt-edged vellum leaf: warm inner glow + deep cast shadow onto the leather */
+    box-shadow:
+      0 0 0 2px #6b4f27,
+      0 0 0 5px #c8a23a,
+      0 0 0 7px #7a5a25,
+      0 22px 60px rgba(0,0,0,.62),
+      0 4px 14px rgba(0,0,0,.5);
   }
 </style>
 </head>

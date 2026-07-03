@@ -100,6 +100,28 @@ test("enrichment typing progress survives tabbing back to combat", () => {
   assert.equal(game.enrichmentInput, "");
 });
 
+test("repair cannot be bought while the walls are whole", () => {
+  const game = createGameModel({ gold: 500 });
+  assert.equal(game.towerHp, game.towerMaxHp);
+  assert.equal(canAffordUpgrade(game, "repair"), false);
+  assert.equal(purchaseUpgrade(game, "repair"), false);
+  assert.equal(game.gold, 500);
+
+  game.towerHp = 40;
+  assert.equal(canAffordUpgrade(game, "repair"), true);
+  assert.equal(purchaseUpgrade(game, "repair"), true);
+  assert.equal(game.towerHp, 100);
+  assert.equal(game.gold, 440);
+});
+
+test("enrichment input stops a few characters past the phrase", () => {
+  const game = createGameModel({ level: 1 });
+  game.setEnrichmentPhrase("knowledge is power");
+  game.toggleMode();
+  game.typeText("z".repeat(40));
+  assert.equal(game.enrichmentInput.length, game.enrichmentPhrase.length + 3);
+});
+
 test("shop upgrades tower and longbowman from separate resources", () => {
   const game = createGameModel({ gold: 500, trainingPoints: 3 });
 
