@@ -127,7 +127,7 @@ test("shop upgrades tower and longbowman from separate resources", () => {
 
   assert.equal(canAffordUpgrade(game, "tower"), true);
   const towerPreview = getUpgradePreview(game, "tower");
-  assert.equal(towerPreview.nextName, "Reinforced Watchtower");
+  assert.equal(towerPreview.nextName, "Lashed Palisade");
 
   purchaseUpgrade(game, "tower");
   assert.equal(game.towerLevel, 2);

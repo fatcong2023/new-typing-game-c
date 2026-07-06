@@ -165,7 +165,7 @@ export function getUpgradePreview(game, upgradeId) {
     return { nextName: "Arrow Charge Refill", goldCost: 80, trainingPointCost: 0 };
   }
   if (upgradeId === "repair") {
-    return { nextName: "Tower Repair", goldCost: 60, trainingPointCost: 0 };
+    return { nextName: "Barricade Repair", goldCost: 60, trainingPointCost: 0 };
   }
   return null;
 }
