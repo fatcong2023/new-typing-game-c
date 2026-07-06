@@ -191,7 +191,7 @@ function startCampaign() {
   app.shakeTimer = 0;
   app.screen = "playing";
   setupLevel();
-  announce("Level 1: hold the wall", 2.2);
+  announce("Level 1: hold the line", 2.2);
 }
 
 function setupLevel() {
@@ -296,8 +296,8 @@ function fireArrow() {
   for (const enemy of hitTargets) {
     const result = applyArrowHit(enemy, arrowId, { weaponDamage });
     app.arrows.push({
-      x: 145,
-      y: 260,
+      x: 118,
+      y: 500,
       tx: enemy.x,
       ty: GROUND - 58 + enemy.laneOffset,
       life: 0.28,
@@ -378,11 +378,11 @@ function nextLevel() {
 function buy(upgradeId) {
   const ok = purchaseUpgrade(app.model, upgradeId);
   if (ok) {
-    const previewName = upgradeId === "repair" ? "Tower repaired" : "Upgrade purchased";
+    const previewName = upgradeId === "repair" ? "Barricade repaired" : "Upgrade purchased";
     announce(previewName, 1.4);
     sfx.coin();
   } else {
-    if (upgradeId === "repair" && app.model.towerHp >= app.model.towerMaxHp) announce("The walls are already whole", 1.2);
+    if (upgradeId === "repair" && app.model.towerHp >= app.model.towerMaxHp) announce("The barricade is already whole", 1.2);
     else announce("Not enough resources", 1.2);
     app.shakeTimer = 0.25;
     sfx.error();
@@ -606,39 +606,28 @@ function drawEnemyBanner() {
   fleurDeLis(px - 13, top + 11 + wob / 2, 6, "#e8c33a");
 }
 
+// Reskinned: the defended structure is now a cheval de frise — an anti-cavalry
+// barricade of crossed sharpened stakes planted on the ground. HP, level,
+// shield, damage-reduction, and repair mechanics are unchanged; this only
+// redraws what the tower used to be. (Internal names stay "tower*".)
 function drawTower() {
-  const top = 260;
   const hpFrac = Math.max(0, app.model.towerHp / app.model.towerMaxHp);
-  // body
-  ctx.fillStyle = "#c2b18d";
-  ctx.fillRect(TOWER_X, top, TOWER_W, GROUND - top);
-  ctx.strokeStyle = INK;
-  ctx.lineWidth = 2;
-  ctx.strokeRect(TOWER_X, top, TOWER_W, GROUND - top);
-  // mortar lines
-  ctx.lineWidth = 1;
-  ctx.strokeStyle = "rgba(110,105,90,0.55)";
-  for (let yy = top + 22; yy < GROUND; yy += 22) {
-    ctx.beginPath(); ctx.moveTo(TOWER_X, yy); ctx.lineTo(TOWER_X + TOWER_W, yy); ctx.stroke();
-    const off = ((yy - top) / 22) % 2 ? 14 : 0;
-    for (let xx = TOWER_X + off + 14; xx < TOWER_X + TOWER_W; xx += 28) {
-      ctx.beginPath(); ctx.moveTo(xx, yy); ctx.lineTo(xx, yy - 22); ctx.stroke();
-    }
-  }
-  // crenellations
-  ctx.fillStyle = "#c2b18d";
-  ctx.strokeStyle = INK;
-  for (let i = 0; i < 4; i++) {
-    const mx = TOWER_X - 2 + i * (TOWER_W + 4 - 18) / 3;
-    ctx.fillRect(mx, top - 16, 18, 16);
-    ctx.strokeRect(mx, top - 16, 18, 16);
-  }
+  const groundY = GROUND;
+  const bx0 = 116, bx1 = 204;           // barricade footprint along the line
+  const unitCount = 4;
+  const unitW = (bx1 - bx0) / unitCount;
+  const s = 12;                         // half-spread of each X at its base
+  const h = 60;                         // stake height (tips reach groundY - h)
+  const railY = groundY - 30;           // where the stakes cross and the rail binds
+  const brokenCount = hpFrac < 0.33 ? 2 : hpFrac < 0.66 ? 1 : 0;
+  const standingUnits = unitCount - brokenCount;
+  const standingRight = bx0 + standingUnits * unitW;
 
-  // St George's cross — the defender's standard, flying toward the foe
-  const fpx = TOWER_X + TOWER_W - 12, fpTop = top - 78;
+  // the line's standard, planted in the ground behind the bowman
+  const fpx = 54, fpTop = 330;
   ctx.strokeStyle = "#5a5245";
   ctx.lineWidth = 3;
-  ctx.beginPath(); ctx.moveTo(fpx, top - 14); ctx.lineTo(fpx, fpTop); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(fpx, groundY); ctx.lineTo(fpx, fpTop); ctx.stroke();
   const wob = Math.sin(performance.now() / 350) * 2.5;
   ctx.save();
   ctx.beginPath();
@@ -661,31 +650,56 @@ function drawTower() {
   ctx.lineTo(fpx + 34, fpTop + 20 + wob); ctx.lineTo(fpx, fpTop + 20);
   ctx.closePath(); ctx.stroke();
 
-  // arrow slit + door
-  ctx.fillStyle = "#4b4437";
-  ctx.fillRect(TOWER_X + TOWER_W / 2 - 3, top + 70, 6, 26);
+  // binding rail behind the stakes, spanning only the still-standing units
   ctx.fillStyle = "#6b4a2a";
-  rr(TOWER_X + TOWER_W / 2 - 15, GROUND - 40, 30, 40, 10); ctx.fill();
-  ctx.strokeStyle = "#4a3018"; ctx.stroke();
+  ctx.strokeStyle = "#4a3018";
+  ctx.lineWidth = 1.4;
+  rr(bx0 - 6, railY - 4, (standingRight - bx0) + 12, 8, 3); ctx.fill(); ctx.stroke();
 
-  // cracks as HP drops
-  ctx.strokeStyle = "rgba(60,55,45,0.8)";
-  ctx.lineWidth = 1.6;
-  if (hpFrac < 0.66) {
+  // the crossed sharpened stakes; broken ones are knocked toward the foe
+  for (let i = 0; i < unitCount; i++) {
+    const cx = bx0 + unitW * (i + 0.5);
+    const broken = i >= standingUnits;
+    ctx.save();
+    ctx.translate(cx, groundY);
+    if (broken) ctx.rotate(0.85);
+    ctx.fillStyle = "#7a4a22";
+    ctx.strokeStyle = "#4a3018";
+    ctx.lineWidth = 0.8;
+    // stake leaning right: base at (-s,0) up to a sharp tip at (s,-h)
     ctx.beginPath();
-    ctx.moveTo(TOWER_X + TOWER_W - 8, GROUND - 8); ctx.lineTo(TOWER_X + TOWER_W - 26, GROUND - 52);
-    ctx.lineTo(TOWER_X + TOWER_W - 14, GROUND - 86); ctx.lineTo(TOWER_X + TOWER_W - 30, GROUND - 122);
+    ctx.moveTo(-s - 2.5, 0); ctx.lineTo(-s + 2.5, 0); ctx.lineTo(s, -h); ctx.closePath();
+    ctx.fill(); ctx.stroke();
+    // stake leaning left: base at (s,0) up to a sharp tip at (-s,-h)
+    ctx.beginPath();
+    ctx.moveTo(s - 2.5, 0); ctx.lineTo(s + 2.5, 0); ctx.lineTo(-s, -h); ctx.closePath();
+    ctx.fill(); ctx.stroke();
+    ctx.restore();
+  }
+
+  // lashings where each standing X crosses the rail
+  ctx.strokeStyle = "#4a3018";
+  ctx.lineWidth = 2;
+  for (let i = 0; i < standingUnits; i++) {
+    const cx = bx0 + unitW * (i + 0.5);
+    ctx.beginPath();
+    ctx.moveTo(cx - 5, railY - 3); ctx.lineTo(cx + 5, railY + 3);
+    ctx.moveTo(cx + 5, railY - 3); ctx.lineTo(cx - 5, railY + 3);
     ctx.stroke();
   }
-  if (hpFrac < 0.33) {
-    ctx.beginPath();
-    ctx.moveTo(TOWER_X + 10, GROUND - 4); ctx.lineTo(TOWER_X + 30, GROUND - 60);
-    ctx.lineTo(TOWER_X + 18, GROUND - 100); ctx.lineTo(TOWER_X + 40, GROUND - 150);
-    ctx.stroke();
+
+  // splinters scattered on the ground where stakes have been shattered
+  if (brokenCount > 0) {
+    ctx.strokeStyle = "rgba(74,48,24,0.8)";
+    ctx.lineWidth = 2;
+    for (let k = 0; k < brokenCount * 3; k++) {
+      const sxp = standingRight + 6 + k * 7;
+      ctx.beginPath(); ctx.moveTo(sxp, groundY - 2); ctx.lineTo(sxp + 8, groundY - 5 - (k % 2) * 4); ctx.stroke();
+    }
   }
 
-  // tower HP bar — above the flag, clear of the crenellations
-  const bw = TOWER_W + 8, bx = TOWER_X - 4, by = top - 104;
+  // barricade HP bar + rubricated name, above the stakes
+  const bw = (bx1 - bx0) + 24, bx = bx0 - 12, by = groundY - h - 44;
   ctx.fillStyle = "rgba(0,0,0,0.35)";
   rr(bx, by, bw, 12, 6); ctx.fill();
   ctx.fillStyle = hpFrac > 0.5 ? "#5cab5c" : hpFrac > 0.25 ? "#d9a441" : "#c0503f";
@@ -693,17 +707,16 @@ function drawTower() {
   ctx.fillStyle = "#2e2a22";
   ctx.font = "bold 11px " + BODY;
   ctx.textAlign = "left";
-  ctx.fillText("TOWER  " + app.model.towerHp + " / " + app.model.towerMaxHp, bx + 2, by - 4);
-  // the keep's name, set like a rubricated caption
+  ctx.fillText("BARRICADE  " + app.model.towerHp + " / " + app.model.towerMaxHp, bx + 2, by - 4);
   ctx.textAlign = "center";
   ctx.font = "italic 13px " + BODY;
   ctx.fillStyle = "rgba(94,58,20,0.85)";
-  ctx.fillText(TOWER_LEVELS[app.model.towerLevel - 1].name, TOWER_X + TOWER_W / 2, by + 26);
+  ctx.fillText(TOWER_LEVELS[app.model.towerLevel - 1].name, bx0 + (bx1 - bx0) / 2, by + 26);
 }
 
 function drawArcher() {
-  const x = 142;
-  const y = 255;
+  const x = 88;
+  const y = 486;
   const target = closestEnemy();
   const ready = app.screen === "playing" && app.model.mode === "combat" && app.wordInput === app.combatWord && app.combatWord.length > 0;
   const ang = target ? Math.max(-0.5, Math.min(0.45, Math.atan2(y + 40 - (GROUND - 40), target.x - x) * -1)) : 0.35;
@@ -711,7 +724,7 @@ function drawArcher() {
   ctx.strokeStyle = "#3a3128";
   ctx.lineWidth = 3;
   ctx.lineCap = "round";
-  // planted stance on the tower top
+  // planted stance on the ground behind the barricade
   ctx.beginPath();
   ctx.moveTo(x, y + 44);
   ctx.lineTo(x - 8, y + 74);
@@ -1282,14 +1295,14 @@ function drawShop() {
   ctx.fillText(
     "Gold " + app.model.gold + "   ·   Training " + app.model.trainingPoints +
     "   ·   Arrow Charge " + app.model.arrowCharge +
-    "   ·   Tower " + app.model.towerHp + " / " + app.model.towerMaxHp,
+    "   ·   Barricade " + app.model.towerHp + " / " + app.model.towerMaxHp,
     W / 2, y);
   y += 44;
 
   const towerPreview = getUpgradePreview(app.model, "tower");
   const bowPreview = getUpgradePreview(app.model, "longbowman");
-  shopRow(y, "1", "Tower Defense", towerPreview,
-    towerPreview ? "raise " + towerPreview.nextName + " — more walls, repair, and damage ward" : "the keep stands at its finest",
+  shopRow(y, "1", "Barricade", towerPreview,
+    towerPreview ? "raise " + towerPreview.nextName + " — sturdier stakes, repair, and damage ward" : "the line stands at its finest",
     { rank: app.model.towerLevel, max: TOWER_LEVELS.length },
     canAffordUpgrade(app.model, "tower"), null);
   y += 56;
@@ -1304,8 +1317,8 @@ function drawShop() {
   y += 56;
   const wallsWhole = app.model.towerHp >= app.model.towerMaxHp;
   shopRow(y, "4", "Repair", getUpgradePreview(app.model, "repair"),
-    wallsWhole ? "the walls are already whole" : "masons mend the walls, +60 HP",
-    null, canAffordUpgrade(app.model, "repair"), wallsWhole ? "walls whole" : null);
+    wallsWhole ? "the barricade already stands whole" : "carpenters mend the stakes, +60 HP",
+    null, canAffordUpgrade(app.model, "repair"), wallsWhole ? "line whole" : null);
   y += 48;
 
   ctx.textAlign = "center";
@@ -1342,8 +1355,8 @@ function draw() {
   if (app.screen === "gameover") {
     drawBackground();
     drawTower();
-    drawOverlay("The Tower Has Fallen", [
-      "The wall was breached at Level " + app.model.level + ".",
+    drawOverlay("The Line Has Fallen", [
+      "The barricade was overrun at Level " + app.model.level + ".",
       "",
       "Gold " + app.model.gold + "   ·   Training Points " + app.model.trainingPoints,
       "The enemy kept moving while the training phrase waited.",
@@ -1354,11 +1367,11 @@ function draw() {
   if (app.screen === "victory") {
     drawBackground();
     drawTower();
-    drawOverlay("The Keep Stands", [
+    drawOverlay("The Line Holds", [
       "All one hundred levels are cleared.",
       "",
       "Final Gold " + app.model.gold + "   ·   Training Points " + app.model.trainingPoints,
-      "Weapon: " + app.model.activeWeaponName + "   ·   Tower: " + TOWER_LEVELS[app.model.towerLevel - 1].name,
+      "Weapon: " + app.model.activeWeaponName + "   ·   Barricade: " + TOWER_LEVELS[app.model.towerLevel - 1].name,
     ], "press ENTER to start a new campaign");
     drawPageBorder();
     return;

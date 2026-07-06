@@ -269,14 +269,14 @@ export const UPGRADE_SYSTEMS = [
 ];
 
 export const TOWER_LEVELS = [
-  { level: 1, name: "Wooden Watchtower", goldCost: 0, maxHp: 100, shield: 0, repair: "None", damageReduction: 0 },
-  { level: 2, name: "Reinforced Watchtower", goldCost: 120, maxHp: 130, shield: 0, repair: "Repair option unlocked", damageReduction: 0 },
-  { level: 3, name: "Stone Base Tower", goldCost: 220, maxHp: 170, shield: 20, repair: "End-level repair +10%", damageReduction: 0.05 },
-  { level: 4, name: "Fortified Tower", goldCost: 380, maxHp: 220, shield: 40, repair: "End-level repair +15%", damageReduction: 0.1 },
-  { level: 5, name: "Ironbound Tower", goldCost: 620, maxHp: 280, shield: 70, repair: "End-level repair +20%", damageReduction: 0.15 },
-  { level: 6, name: "Guardian Tower", goldCost: 900, maxHp: 350, shield: 100, repair: "Emergency shield once per level", damageReduction: 0.18 },
-  { level: 7, name: "Citadel Tower", goldCost: 1300, maxHp: 430, shield: 140, repair: "End-level repair +25%", damageReduction: 0.22 },
-  { level: 8, name: "Dragonstone Keep", goldCost: 1800, maxHp: 520, shield: 200, repair: "Emergency shield + auto repair", damageReduction: 0.25 },
+  { level: 1, name: "Sharpened Stakes", goldCost: 0, maxHp: 100, shield: 0, repair: "None", damageReduction: 0 },
+  { level: 2, name: "Lashed Palisade", goldCost: 120, maxHp: 130, shield: 0, repair: "Repair option unlocked", damageReduction: 0 },
+  { level: 3, name: "Cheval de Frise", goldCost: 220, maxHp: 170, shield: 20, repair: "End-level repair +10%", damageReduction: 0.05 },
+  { level: 4, name: "Ironshod Cheval de Frise", goldCost: 380, maxHp: 220, shield: 40, repair: "End-level repair +15%", damageReduction: 0.1 },
+  { level: 5, name: "Spiked Barricade", goldCost: 620, maxHp: 280, shield: 70, repair: "End-level repair +20%", damageReduction: 0.15 },
+  { level: 6, name: "Iron Chevaux-de-Frise", goldCost: 900, maxHp: 350, shield: 100, repair: "Emergency shield once per level", damageReduction: 0.18 },
+  { level: 7, name: "Barbed Rampart", goldCost: 1300, maxHp: 430, shield: 140, repair: "End-level repair +25%", damageReduction: 0.22 },
+  { level: 8, name: "Dragonsteel Abatis", goldCost: 1800, maxHp: 520, shield: 200, repair: "Emergency shield + auto repair", damageReduction: 0.25 },
 ];
 
 export const LONGBOWMAN_TIERS = [
