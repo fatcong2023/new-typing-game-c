@@ -30,7 +30,7 @@ const TOWER_X = 72;
 const TOWER_W = 118;
 const STOP_X = TOWER_X + TOWER_W + 20;
 const SPAWN_X = W + 60;
-const ARROW_GRAVITY = 780; // px/s² — one sky, one gravity for every shaft
+const ARROW_GRAVITY = 680; // px/s² — one sky, one gravity for every shaft
 const DPR = Math.min(window.devicePixelRatio || 1, 2);
 
 canvas.width = W * DPR;
@@ -333,10 +333,10 @@ function fireArrow() {
 // the mark after flightTime. it carries its victims and its damage; nothing is
 // dealt until the arrow actually arrives.
 function launchArrow(aimEnemy, hits, arrowId, weaponDamage) {
-  const launchX = 118, launchY = 500;
+  const launchX = 128, launchY = 500;
   const slow = aimEnemy.statuses.slow.active ? aimEnemy.statuses.slow.multiplier : 1;
   const targetY = GROUND - 58 + aimEnemy.laneOffset;
-  const flightTime = Math.min(1.5, 0.8 + Math.abs(aimEnemy.x - launchX) / 900);
+  const flightTime = Math.min(1.9, 0.95 + Math.abs(aimEnemy.x - launchX) / 700);
   // lead the mark so the shaft falls where the foe will be, not where it was
   const leadX = aimEnemy.x > STOP_X ? aimEnemy.x - aimEnemy.speed * slow * flightTime : aimEnemy.x;
   const targetX = Math.max(STOP_X - 6, leadX);
@@ -614,6 +614,60 @@ function drawBackground() {
     ctx.moveTo(gx, gy); ctx.lineTo(gx + 3, gy - 8);
     ctx.stroke();
   }
+
+  drawCamps();
+}
+
+// a tall heraldic standard: pole + big waving flag (St George or France)
+function drawStandard(px, kind) {
+  const g = GROUND, poleTop = g - 250;
+  ctx.strokeStyle = "#4a4038"; ctx.lineWidth = 4; ctx.lineCap = "round";
+  ctx.beginPath(); ctx.moveTo(px, g); ctx.lineTo(px, poleTop); ctx.stroke();
+  ctx.fillStyle = "#d8c98f";
+  ctx.beginPath(); ctx.arc(px, poleTop - 2, 3.6, 0, 7); ctx.fill();
+  const fw = 62, fh = 42, w = Math.sin(performance.now() / 340 + (kind === "france" ? 2 : 0)) * 2.8;
+  const quad = () => {
+    ctx.beginPath();
+    ctx.moveTo(px, poleTop); ctx.lineTo(px + fw, poleTop + w);
+    ctx.lineTo(px + fw, poleTop + fh + w); ctx.lineTo(px, poleTop + fh);
+    ctx.closePath();
+  };
+  ctx.save(); quad();
+  ctx.fillStyle = kind === "france" ? "#2b4a9b" : "#f4f1e8"; ctx.fill(); ctx.clip();
+  if (kind === "france") {
+    fleurDeLis(px + 18, poleTop + 14 + w / 2, 7, "#e8c33a");
+    fleurDeLis(px + 44, poleTop + 14 + w / 2, 7, "#e8c33a");
+    fleurDeLis(px + 31, poleTop + 32 + w / 2, 7, "#e8c33a");
+  } else {
+    ctx.fillStyle = "#c8102e";
+    ctx.fillRect(px, poleTop + fh / 2 - 4 + w / 2, fw, 8);
+    ctx.fillRect(px + fw / 2 - 4, poleTop - 2, 8, fh + 4);
+  }
+  ctx.restore();
+  ctx.strokeStyle = "rgba(70,60,45,0.55)"; ctx.lineWidth = 1;
+  quad(); ctx.stroke();
+}
+
+// two facing encampments — English colours on the left, French on the right
+function drawCamps() {
+  const g = GROUND;
+  function tent(cx, hw, ht, body, trim) {
+    ctx.fillStyle = body; ctx.strokeStyle = INK; ctx.lineWidth = 1.4;
+    ctx.beginPath(); ctx.moveTo(cx - hw, g); ctx.lineTo(cx, g - ht); ctx.lineTo(cx + hw, g); ctx.closePath();
+    ctx.fill(); ctx.stroke();
+    ctx.fillStyle = "rgba(40,30,18,0.5)";
+    ctx.beginPath(); ctx.moveTo(cx - 4, g); ctx.lineTo(cx, g - ht * 0.5); ctx.lineTo(cx + 4, g); ctx.closePath(); ctx.fill();
+    ctx.strokeStyle = "#5a5245"; ctx.lineWidth = 1.3;
+    ctx.beginPath(); ctx.moveTo(cx, g - ht); ctx.lineTo(cx, g - ht - 11); ctx.stroke();
+    const w = Math.sin(performance.now() / 330 + cx) * 2;
+    ctx.fillStyle = trim;
+    ctx.beginPath(); ctx.moveTo(cx, g - ht - 11); ctx.lineTo(cx + 11, g - ht - 8 + w); ctx.lineTo(cx, g - ht - 5); ctx.closePath(); ctx.fill();
+  }
+  tent(24, 19, 40, "#efe7d0", "#c8102e");
+  tent(70, 14, 30, "#e7dcc0", "#c8102e");
+  tent(W - 26, 19, 40, "#c3cdea", "#e8c33a");
+  tent(W - 72, 14, 30, "#b4c0e0", "#e8c33a");
+  drawStandard(16, "stgeorge");
 }
 
 function fleurDeLis(x, y, s, color) {
@@ -629,26 +683,9 @@ function fleurDeLis(x, y, s, color) {
   ctx.fillRect(x - s * 0.14, y + s * 0.5, s * 0.28, s * 0.42);
 }
 
-// enemy rallying banner planted where the host musters
+// the French host's great banner, flying over their camp on the right
 function drawEnemyBanner() {
-  const px = W - 42, top = GROUND - 82;
-  ctx.strokeStyle = "#5a5245";
-  ctx.lineWidth = 3;
-  ctx.beginPath(); ctx.moveTo(px, GROUND); ctx.lineTo(px, top); ctx.stroke();
-  const wob = Math.sin(performance.now() / 320 + 2) * 2.5;
-  ctx.beginPath();
-  ctx.moveTo(px, top);
-  ctx.lineTo(px - 36, top + wob);
-  ctx.lineTo(px - 27, top + 11 + wob);
-  ctx.lineTo(px - 36, top + 22 + wob);
-  ctx.lineTo(px, top + 22);
-  ctx.closePath();
-  ctx.fillStyle = "#2b4a9b";
-  ctx.fill();
-  ctx.strokeStyle = "#1d3468";
-  ctx.lineWidth = 1;
-  ctx.stroke();
-  fleurDeLis(px - 13, top + 11 + wob / 2, 6, "#e8c33a");
+  drawStandard(W - 92, "france");
 }
 
 // Reskinned: the defended structure is now a cheval de frise — an anti-cavalry
@@ -667,33 +704,6 @@ function drawTower() {
   const brokenCount = hpFrac < 0.33 ? 2 : hpFrac < 0.66 ? 1 : 0;
   const standingUnits = unitCount - brokenCount;
   const standingRight = bx0 + standingUnits * unitW;
-
-  // the line's standard, planted in the ground behind the bowman
-  const fpx = 54, fpTop = 330;
-  ctx.strokeStyle = "#5a5245";
-  ctx.lineWidth = 3;
-  ctx.beginPath(); ctx.moveTo(fpx, groundY); ctx.lineTo(fpx, fpTop); ctx.stroke();
-  const wob = Math.sin(performance.now() / 350) * 2.5;
-  ctx.save();
-  ctx.beginPath();
-  ctx.moveTo(fpx, fpTop);
-  ctx.lineTo(fpx + 34, fpTop + wob);
-  ctx.lineTo(fpx + 34, fpTop + 20 + wob);
-  ctx.lineTo(fpx, fpTop + 20);
-  ctx.closePath();
-  ctx.fillStyle = "#f4f1e8";
-  ctx.fill();
-  ctx.clip();
-  ctx.fillStyle = "#c8102e";
-  ctx.fillRect(fpx, fpTop + 7 + wob / 2, 34, 6);
-  ctx.fillRect(fpx + 13, fpTop - 3, 7, 28);
-  ctx.restore();
-  ctx.strokeStyle = "rgba(90,82,69,0.6)";
-  ctx.lineWidth = 1;
-  ctx.beginPath();
-  ctx.moveTo(fpx, fpTop); ctx.lineTo(fpx + 34, fpTop + wob);
-  ctx.lineTo(fpx + 34, fpTop + 20 + wob); ctx.lineTo(fpx, fpTop + 20);
-  ctx.closePath(); ctx.stroke();
 
   // binding rail behind the stakes, spanning only the still-standing units
   ctx.fillStyle = "#6b4a2a";
@@ -760,90 +770,88 @@ function drawTower() {
 }
 
 function drawArcher() {
-  const x = 88;
+  const x = 98;
   const y = 486;
+  const g = GROUND;
   const target = closestEnemy();
   const ready = app.screen === "playing" && app.model.mode === "combat" && app.wordInput === app.combatWord && app.combatWord.length > 0;
-  const ang = target ? Math.max(-0.5, Math.min(0.45, Math.atan2(y + 40 - (GROUND - 40), target.x - x) * -1)) : 0.35;
+  const ang = target ? Math.max(-0.5, Math.min(0.45, Math.atan2(y + 40 - (g - 40), target.x - x) * -1)) : 0.32;
 
-  ctx.strokeStyle = "#3a3128";
-  ctx.lineWidth = 3;
   ctx.lineCap = "round";
-  // planted stance on the ground behind the barricade
-  ctx.beginPath();
-  ctx.moveTo(x, y + 44);
-  ctx.lineTo(x - 8, y + 74);
-  ctx.moveTo(x, y + 44);
-  ctx.lineTo(x + 7, y + 74);
-  ctx.stroke();
-  // straight back
-  ctx.beginPath(); ctx.moveTo(x, y + 10); ctx.lineTo(x, y + 46); ctx.stroke();
 
-  // quiver at the hip
-  ctx.save();
-  ctx.translate(x - 9, y + 40);
-  ctx.rotate(0.5);
-  ctx.fillStyle = "#6b4a2a";
-  ctx.fillRect(-3, -9, 6, 15);
-  ctx.strokeStyle = "#5b4325";
-  ctx.lineWidth = 1.4;
-  ctx.beginPath();
-  ctx.moveTo(-1, -9); ctx.lineTo(-2, -15);
-  ctx.moveTo(2, -9); ctx.lineTo(1, -15);
-  ctx.stroke();
-  ctx.restore();
+  // a sheaf of arrows planted point-down in the turf beside him
+  for (let i = 0; i < 3; i += 1) {
+    const axp = x - 22 + i * 6;
+    ctx.strokeStyle = "#6b4a2a"; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(axp, g - 1); ctx.lineTo(axp - 3, g - 30); ctx.stroke();
+    ctx.strokeStyle = "#d8d2c4"; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.moveTo(axp - 3, g - 30); ctx.lineTo(axp - 6, g - 36); ctx.stroke();
+  }
 
-  // longbowman's surcoat — white with St George's cross
-  ctx.fillStyle = "#f4f1e8";
-  ctx.fillRect(x - 7, y + 8, 14, 20);
+  // legs — padded hose with some volume, planted stance
+  ctx.strokeStyle = "#5f4d30"; ctx.lineWidth = 7;
+  ctx.beginPath();
+  ctx.moveTo(x - 1, y + 42); ctx.lineTo(x - 7, y + 72);
+  ctx.moveTo(x + 3, y + 42); ctx.lineTo(x + 9, y + 72);
+  ctx.stroke();
+  ctx.fillStyle = "#3a2c1a";
+  ctx.beginPath(); ctx.ellipse(x - 8, y + 73, 5, 3, 0, 0, 7); ctx.fill();
+  ctx.beginPath(); ctx.ellipse(x + 10, y + 73, 5, 3, 0, 0, 7); ctx.fill();
+
+  // padded jack / jupon in white St George livery
+  ctx.fillStyle = "#f2eddd"; ctx.strokeStyle = INK; ctx.lineWidth = 1.4;
+  ctx.beginPath();
+  ctx.moveTo(x - 11, y + 6); ctx.lineTo(x + 11, y + 6);
+  ctx.lineTo(x + 9, y + 43); ctx.lineTo(x - 9, y + 43);
+  ctx.closePath(); ctx.fill(); ctx.stroke();
+  ctx.strokeStyle = "rgba(120,105,80,0.45)"; ctx.lineWidth = 0.8;
+  for (let qx = -6; qx <= 6; qx += 4) { ctx.beginPath(); ctx.moveTo(x + qx, y + 8); ctx.lineTo(x + qx, y + 42); ctx.stroke(); }
   ctx.fillStyle = "#c8102e";
-  ctx.fillRect(x - 1.5, y + 8, 3, 20);
-  ctx.fillRect(x - 7, y + 16, 14, 3);
-  ctx.strokeStyle = "rgba(60,50,40,0.35)";
-  ctx.lineWidth = 1;
-  ctx.strokeRect(x - 7, y + 8, 14, 20);
+  ctx.fillRect(x - 2, y + 6, 4, 37);
+  ctx.fillRect(x - 11, y + 20, 22, 4);
+  ctx.strokeStyle = "#4a3320"; ctx.lineWidth = 2.4;
+  ctx.beginPath(); ctx.moveTo(x - 10, y + 41); ctx.lineTo(x + 10, y + 41); ctx.stroke();
 
-  // hooded head, eyes on the field
+  // face under a broad-brimmed kettle helmet
   ctx.fillStyle = "#e0b48e";
-  ctx.beginPath(); ctx.arc(x + 1, y - 1, 7, 0, 7); ctx.fill();
-  ctx.fillStyle = "#4e6b3a";
-  ctx.beginPath(); ctx.arc(x + 1, y - 2, 7.4, Math.PI * 0.95, Math.PI * 1.95); ctx.fill();
+  ctx.beginPath(); ctx.arc(x + 1, y - 4, 6.5, 0, 7); ctx.fill();
+  ctx.fillStyle = "#aab0b8"; ctx.strokeStyle = INK; ctx.lineWidth = 1.2;
+  ctx.beginPath(); ctx.arc(x + 1, y - 6, 8, Math.PI, 0); ctx.fill(); ctx.stroke();
+  ctx.fillStyle = "#c2c7cf";
+  ctx.beginPath(); ctx.ellipse(x + 1, y - 6, 13, 3.4, 0, 0, 7); ctx.fill(); ctx.stroke();
 
-  // arms to the great warbow
-  const bx = x + 26, by = y + 16;
-  const pull = ready ? -10 : 0;
-  ctx.strokeStyle = "#3a3128";
-  ctx.lineWidth = 3;
-  ctx.beginPath(); ctx.moveTo(x, y + 14); ctx.lineTo(bx, by); ctx.stroke();
-  ctx.beginPath();
-  ctx.moveTo(x, y + 14);
-  if (ready) ctx.lineTo(bx + pull, by);
-  else ctx.lineTo(x - 5, y + 28);
-  ctx.stroke();
+  // front (bow) arm reaching to the grip
+  const bx = x + 15, by = y + 16;
+  const pull = ready ? -12 : 0;
+  ctx.strokeStyle = "#e6e0cf"; ctx.lineWidth = 5;
+  ctx.beginPath(); ctx.moveTo(x + 6, y + 10); ctx.lineTo(bx, by); ctx.stroke();
 
+  // the great warbow — a tall D-stave, taller than the man, tinted by the arrow
   ctx.save();
   ctx.translate(bx, by);
   ctx.rotate(-ang);
-  // the warbow — tinted faintly by the chosen arrow
+  const R = 36;
   ctx.strokeStyle = app.model.activeArrowId === "normal" ? "#7a4a22" : ARROW_TINTS[app.model.activeArrowId] ?? "#7a4a22";
-  ctx.lineWidth = 3;
-  ctx.beginPath(); ctx.arc(0, 0, 22, -Math.PI / 2.15, Math.PI / 2.15); ctx.stroke();
-  const tipX = 22 * Math.cos(Math.PI / 2.15), tipY = 22 * Math.sin(Math.PI / 2.15);
-  ctx.strokeStyle = "#e8e4d8";
-  ctx.lineWidth = 1;
-  ctx.beginPath();
-  ctx.moveTo(tipX, -tipY);
-  ctx.lineTo(pull, 0);
-  ctx.lineTo(tipX, tipY);
-  ctx.stroke();
+  ctx.lineWidth = 3.5;
+  ctx.beginPath(); ctx.arc(0, 0, R, -Math.PI / 2.05, Math.PI / 2.05); ctx.stroke();
+  const tipX = R * Math.cos(Math.PI / 2.05), tipY = R * Math.sin(Math.PI / 2.05);
+  ctx.strokeStyle = "#efe9dc"; ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(tipX, -tipY); ctx.lineTo(pull, 0); ctx.lineTo(tipX, tipY); ctx.stroke();
   if (ready) {
-    ctx.strokeStyle = "#5b4325";
-    ctx.lineWidth = 2;
-    ctx.beginPath(); ctx.moveTo(pull, 0); ctx.lineTo(26, 0); ctx.stroke();
+    ctx.strokeStyle = "#5b4325"; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(pull, 0); ctx.lineTo(32, 0); ctx.stroke();
     ctx.fillStyle = "#c9cdd4";
-    ctx.beginPath(); ctx.moveTo(26, 0); ctx.lineTo(20.5, -3); ctx.lineTo(20.5, 3); ctx.closePath(); ctx.fill();
+    ctx.beginPath(); ctx.moveTo(32, 0); ctx.lineTo(26, -3); ctx.lineTo(26, 3); ctx.closePath(); ctx.fill();
   }
   ctx.restore();
+
+  // rear (draw) arm — hauled back to the cheek at full draw
+  ctx.strokeStyle = "#e6e0cf"; ctx.lineWidth = 5;
+  ctx.beginPath();
+  ctx.moveTo(x - 4, y + 10);
+  if (ready) ctx.lineTo(x - 2, y + 2);
+  else ctx.lineTo(x - 9, y + 24);
+  ctx.stroke();
 }
 
 // shared figure so the field and the start-screen legend match
@@ -927,7 +935,8 @@ function drawEnemyFigure(enemy, knockLunge) {
 }
 
 function drawEnemy(enemy) {
-  const scale = enemy.id === "boss" ? 1.55 : enemy.id === "brute" ? 1.2 : enemy.id === "swarm" ? 0.85 : 1;
+  // 1.4x base so the French host stands eye-to-eye with the English bowman
+  const scale = (enemy.id === "boss" ? 1.55 : enemy.id === "brute" ? 1.2 : enemy.id === "swarm" ? 0.85 : 1) * 1.4;
   ctx.save();
   const knocking = enemy.dyingTimer <= 0 && enemy.alive && enemy.x <= STOP_X;
   const knockLunge = knocking ? Math.abs(Math.sin(enemy.attackTimer / 1.2 * Math.PI)) : 0;
@@ -1365,6 +1374,33 @@ function drawShop() {
     wallsWhole ? "the barricade already stands whole" : "carpenters mend the stakes, +60 HP",
     null, canAffordUpgrade(app.model, "repair"), wallsWhole ? "line whole" : null);
   y += 48;
+
+  // the foes massing for the next assault, so the player can plan purchases
+  const nextLevel = app.model.level + 1;
+  const nextIds = getLevelConfig(nextLevel).enemyIds;
+  ctx.textAlign = "center";
+  ctx.font = "italic 15px " + BODY;
+  ctx.fillStyle = "rgba(122,20,32,0.85)";
+  ctx.fillText("Next assault — foes sighted for Level " + nextLevel, W / 2, y + 6);
+  const rowY = y + 84;
+  const gap = Math.min(180, 520 / Math.max(1, nextIds.length));
+  let ex = W / 2 - gap * (nextIds.length - 1) / 2;
+  for (const id of nextIds) {
+    const type = ENEMY_TYPES.find((t) => t.id === id);
+    const dummy = { id, phase: 0.8, maxArmor: type.armor, statuses: null };
+    ctx.save();
+    ctx.translate(ex, rowY);
+    drawEnemyFigure(dummy, 0);
+    ctx.restore();
+    ctx.fillStyle = "#33240f";
+    ctx.font = "12px " + BODY;
+    ctx.fillText(type.name, ex, rowY + 24);
+    if (type.armor > 0) {
+      ctx.fillStyle = "rgba(70,52,26,0.7)";
+      ctx.fillText(type.armor + " armor", ex, rowY + 40);
+    }
+    ex += gap;
+  }
 
   ctx.textAlign = "center";
   const pulse = 0.55 + 0.45 * Math.sin(performance.now() / 300);
