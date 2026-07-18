@@ -30,6 +30,7 @@ const TOWER_X = 72;
 const TOWER_W = 118;
 const STOP_X = TOWER_X + TOWER_W + 20;
 const SPAWN_X = W + 60;
+const ARROW_GRAVITY = 780; // px/s² — one sky, one gravity for every shaft
 const DPR = Math.min(window.devicePixelRatio || 1, 2);
 
 canvas.width = W * DPR;
@@ -241,11 +242,34 @@ function livingEnemies() {
 }
 
 function closestEnemy() {
-  return livingEnemies().sort((a, b) => a.x - b.x)[0] ?? null;
+  return sortedTargets()[0] ?? null;
+}
+
+function pendingArrowsFor(enemy) {
+  return app.arrows.filter((arrow) => arrow.hits.includes(enemy));
+}
+
+// replay the shafts already in the air against a ghost copy — if they will
+// finish this foe on their own, fresh shots should pick another mark
+function isDoomed(enemy) {
+  const pending = pendingArrowsFor(enemy);
+  if (!pending.length) return false;
+  const ghost = {
+    ...enemy,
+    statuses: {
+      burning: { ...enemy.statuses.burning },
+      poison: { ...enemy.statuses.poison },
+      slow: { ...enemy.statuses.slow },
+    },
+  };
+  for (const arrow of pending) applyArrowHit(ghost, arrow.arrowId, { weaponDamage: arrow.weaponDamage });
+  return !ghost.alive;
 }
 
 function sortedTargets() {
-  return livingEnemies().sort((a, b) => a.x - b.x);
+  // nearest first; foes already doomed by in-flight arrows fall to the back
+  const rank = new Map(livingEnemies().map((enemy) => [enemy, isDoomed(enemy) ? 1 : 0]));
+  return [...rank.keys()].sort((a, b) => rank.get(a) - rank.get(b) || a.x - b.x);
 }
 
 function selectArrow(arrowId) {
@@ -293,31 +317,47 @@ function fireArrow() {
   } else {
     hitTargets = [primary];
   }
-  for (const enemy of hitTargets) {
-    const result = applyArrowHit(enemy, arrowId, { weaponDamage });
-    app.arrows.push({
-      x: 118,
-      y: 500,
-      tx: enemy.x,
-      ty: GROUND - 58 + enemy.laneOffset,
-      life: 0.28,
-      arrowId,
-    });
-    if (result.armorHit) { addBurst(enemy.x, GROUND - 62, "#cfd6df", 8); sfx.hitArmor(); }
-    if (!enemy.alive) defeatEnemy(enemy);
-  }
-  if (arrowId === "explosive") addBurst(primary.x, GROUND - 52, "#c98a3a", 18);
+  // loose the shaft now — the blow lands only when it does (resolveArrowImpact)
+  launchArrow(primary, hitTargets, arrowId, weaponDamage);
 
   if (app.model.completedPhrases > 0 && app.model.completedPhrases % 2 === 0) {
-    const bonus = targets.find((enemy) => enemy.alive);
-    if (bonus) {
-      applyArrowHit(bonus, "normal", { weaponDamage });
-      if (!bonus.alive) defeatEnemy(bonus);
-    }
+    const bonus = sortedTargets().find((enemy) => !hitTargets.includes(enemy));
+    if (bonus) launchArrow(bonus, [bonus], "normal", weaponDamage);
   }
 
   sfx.shoot();
   nextCombatWord();
+}
+
+// build a ballistic shaft: fixed gravity, launch velocity solved so it lands on
+// the mark after flightTime. it carries its victims and its damage; nothing is
+// dealt until the arrow actually arrives.
+function launchArrow(aimEnemy, hits, arrowId, weaponDamage) {
+  const launchX = 118, launchY = 500;
+  const slow = aimEnemy.statuses.slow.active ? aimEnemy.statuses.slow.multiplier : 1;
+  const targetY = GROUND - 58 + aimEnemy.laneOffset;
+  const flightTime = Math.min(1.5, 0.8 + Math.abs(aimEnemy.x - launchX) / 900);
+  // lead the mark so the shaft falls where the foe will be, not where it was
+  const leadX = aimEnemy.x > STOP_X ? aimEnemy.x - aimEnemy.speed * slow * flightTime : aimEnemy.x;
+  const targetX = Math.max(STOP_X - 6, leadX);
+  app.arrows.push({
+    x0: launchX, y0: launchY, x: launchX, y: launchY,
+    vx: (targetX - launchX) / flightTime,
+    vy: (targetY - launchY - 0.5 * ARROW_GRAVITY * flightTime * flightTime) / flightTime,
+    t: 0, T: flightTime,
+    hits, arrowId, weaponDamage,
+  });
+}
+
+function resolveArrowImpact(arrow) {
+  for (const enemy of arrow.hits) {
+    if (!enemy.alive || enemy.dyingTimer > 0) continue;
+    const result = applyArrowHit(enemy, arrow.arrowId, { weaponDamage: arrow.weaponDamage });
+    if (result.armorHit) { addBurst(enemy.x, GROUND - 62, "#cfd6df", 8); sfx.hitArmor(); }
+    else if (result.hpDamage > 0) addBurst(enemy.x, GROUND - 56, ARROW_TINTS[arrow.arrowId] ?? "#b03a2e", 6);
+    if (!enemy.alive) defeatEnemy(enemy);
+  }
+  if (arrow.arrowId === "explosive") addBurst(arrow.x, GROUND - 52, "#c98a3a", 18);
 }
 
 function defeatEnemy(enemy) {
@@ -425,8 +465,13 @@ function update(dt) {
   }
   app.particles = app.particles.filter((particle) => particle.life > 0);
 
-  for (const arrow of app.arrows) arrow.life -= dt;
-  app.arrows = app.arrows.filter((arrow) => arrow.life > 0);
+  for (const arrow of app.arrows) {
+    arrow.t += dt;
+    arrow.x = arrow.x0 + arrow.vx * arrow.t;
+    arrow.y = arrow.y0 + arrow.vy * arrow.t + 0.5 * ARROW_GRAVITY * arrow.t * arrow.t;
+    if (arrow.t >= arrow.T) { resolveArrowImpact(arrow); arrow.landed = true; }
+  }
+  app.arrows = app.arrows.filter((arrow) => !arrow.landed);
 
   if (app.screen !== "playing") return;
 
@@ -947,12 +992,12 @@ function drawEnemy(enemy) {
 
 function drawArrows() {
   for (const arrow of app.arrows) {
-    const t = 1 - arrow.life / 0.28;
-    const x = arrow.x + (arrow.tx - arrow.x) * t;
-    const y = arrow.y + (arrow.ty - arrow.y) * t - Math.sin(t * Math.PI) * 38;
+    // pitch the shaft along its real velocity: nose up while climbing, level
+    // at the apex, then steeply down as gravity pulls it onto the target
+    const vyNow = arrow.vy + ARROW_GRAVITY * arrow.t;
     ctx.save();
-    ctx.translate(x, y);
-    ctx.rotate(Math.atan2(arrow.ty - arrow.y, arrow.tx - arrow.x));
+    ctx.translate(arrow.x, arrow.y);
+    ctx.rotate(Math.atan2(vyNow, arrow.vx));
     ctx.strokeStyle = ARROW_TINTS[arrow.arrowId] ?? "#5b4325";
     ctx.lineWidth = 2;
     ctx.beginPath(); ctx.moveTo(-14, 0); ctx.lineTo(2, 0); ctx.stroke();
