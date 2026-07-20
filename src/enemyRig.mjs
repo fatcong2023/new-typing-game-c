@@ -83,11 +83,23 @@ const RENDER_PLANS = Object.freeze({
   grunt: Object.freeze({
     shieldSide: "near",
     weaponSide: "far",
-    showWeaponArmWhileWalking: false,
-    weaponLayer: "between_body_and_shield",
+    // The viewer watches the grunt's LEFT profile: the near/left hand shows its
+    // back on the shield grip (mostly hidden by the shield). The far/right sword
+    // arm lives BEHIND the torso, so the body occludes the upper arm, most of
+    // the forearm and the hilt; only the palm-side fist and the blade clear the
+    // silhouette — real side-view Z-layering, not an arm pasted on the jack.
+    showWeaponArmWhileWalking: true,
+    shieldCarriedHigh: true,
+    weaponLayer: "behind_body",
     armVisuals: Object.freeze({
       shieldUpper: "far_upper_arm",
       shieldForearm: "far_forearm_hand",
+    }),
+    // Asset naming is swapped vs content: "near-forearm-hand.png" holds the
+    // palm-side sword fist, so the weapon arm borrows the near-named art.
+    weaponArmVisuals: Object.freeze({
+      upper: "near_upper_arm",
+      forearm: "near_forearm_hand",
     }),
     bootVisuals: Object.freeze({ near: "near_boot", far: "near_boot" }),
   }),
@@ -108,8 +120,11 @@ const BONE_LENGTHS = Object.freeze({
   spine: 15.5,
   neck: 4.5,
   head: 5,
-  upperArm: 8.5,
-  forearm: 8.5,
+  // Slightly longer arms (closer to human proportion) let the sword hand drop
+  // below the high-carried shield's taper, so the blade stays partly visible
+  // instead of vanishing behind the shield through half the walk cycle.
+  upperArm: 10.2,
+  forearm: 10.2,
   thigh: 10.5,
   shin: 10.5,
 });
@@ -259,10 +274,20 @@ function makeLocomotionPose(definition, locomotionPhase) {
   const nearSwing = Math.sin(cycle);
   const farSwing = Math.sin(cycle + Math.PI);
   const nearUpperAngle = -0.28 - gait.armSwing * nearSwing;
-  const farUpperAngle = 0.2 - gait.armSwing * farSwing;
+  // The sword arm swings well AHEAD of the hip (negative = toward the walking
+  // direction). The arm is drawn BEHIND the torso, so only what clears the
+  // body's front silhouette shows: the torso naturally occludes the upper arm,
+  // most of the forearm and the hilt, leaving the fist and blade peeking out.
+  const farUpperAngle = -0.92 - gait.armSwing * farSwing * 0.55;
   const nearElbow = pointDown(nearShoulder, nearUpperAngle, BONE_LENGTHS.upperArm);
   const farElbow = pointDown(farShoulder, farUpperAngle, BONE_LENGTHS.upperArm);
-  const nearWrist = pointDown(nearElbow, nearUpperAngle - 0.18, BONE_LENGTHS.forearm);
+  // A strapped shield is CARRIED, not dangled: the forearm bends up across the
+  // chest so the shield rides shoulder-to-waist (concept pose) and leaves the
+  // palm-side sword hand visible below it. Other rigs keep the straight arm.
+  const renderPlanForPose = RENDER_PLANS[definition.id];
+  const nearWrist = renderPlanForPose?.shieldCarriedHigh
+    ? pointDown(nearElbow, -2.02 + 0.07 * nearSwing, BONE_LENGTHS.forearm)
+    : pointDown(nearElbow, nearUpperAngle - 0.18, BONE_LENGTHS.forearm);
   const farWrist = pointDown(farElbow, farUpperAngle + 0.24, BONE_LENGTHS.forearm);
 
   const root = { x: 0, y: 0 };
@@ -284,7 +309,10 @@ function makeLocomotionPose(definition, locomotionPhase) {
       y: weaponGrip.y + Math.sin(bladeAngle) * bladeLength,
     };
   } else {
-    weaponTip = extendSegment(nearElbow, nearWrist, 13);
+    // The blade continues the SAME forearm that grips it. Building the tip
+    // from the other arm made the sword stretch between two counter-swinging
+    // hands — it shrank to a dagger and flailed around the chest.
+    weaponTip = extendSegment(farElbow, farWrist, 13);
   }
   return {
     id: definition.id,

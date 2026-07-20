@@ -26,16 +26,18 @@ test("grunt and runner expose multi-joint cutout skeleton definitions", () => {
   }
 });
 
-test("grunt render contract keeps the shield arm near, hides the sword arm, and reuses a side-view far boot", () => {
+test("grunt render contract shows the viewer a shield-back near hand and a palm-side sword hand", () => {
   assert.equal(typeof enemyRig.getEnemyRigRenderPlan, "function");
   const plan = enemyRig.getEnemyRigRenderPlan("grunt");
   assert.equal(plan.shieldSide, "near", "the visible left arm must carry the shield");
-  assert.equal(plan.weaponSide, "far", "the hidden right arm must carry the sword");
-  assert.equal(plan.showWeaponArmWhileWalking, false, "the far-side sword arm must stay behind the torso");
-  assert.equal(plan.weaponLayer, "between_body_and_shield", "the shield may hide the arm, but not the whole sword");
+  assert.equal(plan.weaponSide, "far", "the right arm reaching across the body must carry the sword");
+  assert.equal(plan.showWeaponArmWhileWalking, true, "the sword must be visibly held, not floating unheld");
+  assert.equal(plan.weaponLayer, "behind_body", "the torso must occlude the far arm and part of the sword — true side-view Z-layering");
   assert.ok(plan.armVisuals, "grunt render plan needs explicit arm artwork roles");
   assert.equal(plan.armVisuals.shieldUpper, "far_upper_arm");
   assert.equal(plan.armVisuals.shieldForearm, "far_forearm_hand", "the shield hand must not contain the sword hilt artwork");
+  assert.ok(plan.weaponArmVisuals, "grunt render plan needs explicit sword-arm artwork roles");
+  assert.equal(plan.weaponArmVisuals.forearm, "near_forearm_hand", "the sword hand must be the palm-side fist on the hilt");
   assert.equal(plan.bootVisuals.near, "near_boot");
   assert.equal(plan.bootVisuals.far, "near_boot", "the front-facing far boot must not be twisted into a side view");
 
@@ -292,5 +294,38 @@ test("death animation is continuous, stays on one root, and never flips a limb",
         );
       }
     }
+  }
+});
+
+test("runner sword continues the same forearm that grips it", () => {
+  for (let index = 0; index < 40; index += 1) {
+    const pose = enemyRig.getEnemyRigPose("runner", { locomotionPhase: index / 40 });
+    const forearm = {
+      x: pose.joints.farWrist.x - pose.joints.farElbow.x,
+      y: pose.joints.farWrist.y - pose.joints.farElbow.y,
+    };
+    const blade = {
+      x: pose.weaponTip.x - pose.weaponGrip.x,
+      y: pose.weaponTip.y - pose.weaponGrip.y,
+    };
+    const cross = forearm.x * blade.y - forearm.y * blade.x;
+    const dot = forearm.x * blade.x + forearm.y * blade.y;
+    assert.ok(Math.abs(cross) < 1e-6, `blade must be collinear with the far forearm at phase ${index / 40}`);
+    assert.ok(dot > 0, `blade must point beyond the gripping wrist at phase ${index / 40}`);
+    assert.ok(distance(pose.weaponGrip, pose.weaponTip) >= 10, "the sword must keep a readable length");
+  }
+});
+
+test("grunt sword hand hangs ahead of the torso so the blade never crosses the belly", () => {
+  for (let index = 0; index < 40; index += 1) {
+    const pose = enemyRig.getEnemyRigPose("grunt", { locomotionPhase: index / 40 });
+    assert.ok(
+      pose.weaponGrip.x <= pose.joints.farHip.x + 0.5,
+      `sword wrist must not trail behind the far hip at phase ${index / 40}`,
+    );
+    assert.ok(
+      pose.weaponTip.x < pose.weaponGrip.x,
+      `blade must point toward the walking direction at phase ${index / 40}`,
+    );
   }
 });
