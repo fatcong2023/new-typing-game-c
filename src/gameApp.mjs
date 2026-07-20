@@ -20,6 +20,19 @@ import {
   purchaseUpgrade,
   tickStatusEffects,
 } from "./gameLogic.mjs";
+import {
+  ARCHER_WORLD_SCALE,
+  getArcherRigPose,
+  getLongbowGeometry,
+  scaleArcherRigPoint,
+} from "./archerRig.mjs";
+import {
+  getEnemyDeathDuration,
+  getEnemyRigDefinition,
+  getEnemyRigPose,
+  getEnemyRigRenderPlan,
+} from "./enemyRig.mjs";
+import { getRigPartTransform } from "./rigGeometry.mjs";
 
 const canvas = document.getElementById("game");
 const ctx = canvas.getContext("2d");
@@ -32,6 +45,84 @@ const STOP_X = TOWER_X + TOWER_W + 20;
 const SPAWN_X = W + 60;
 const ARROW_GRAVITY = 680; // px/s² — one sky, one gravity for every shaft
 const DPR = Math.min(window.devicePixelRatio || 1, 2);
+
+const ARCHER_SPRITE_SOURCE = { x: 139, y: 53, w: 789, h: 1351 };
+const ARCHER_SPRITE_DEST = { x: 61.5, y: 472.4, w: 51, h: 87.6 };
+const ARCHER_RIG_ROOT = { x: 87, y: GROUND + 2 };
+const ARCHER_RIG_BODY_SCALE = 0.126;
+const ARCHER_RELEASE_AT = 0.12;
+const ARCHER_ANIMATION_END = 0.62;
+const archerSprite = new Image();
+archerSprite.decoding = "async";
+archerSprite.src = new URL("./assets/english-longbowman-cartoon.png", import.meta.url).href;
+
+const loadArcherRigImage = (filename) => {
+  const image = new Image();
+  image.decoding = "async";
+  image.src = new URL(`./assets/english-longbowman-rig/${filename}`, import.meta.url).href;
+  return image;
+};
+const archerRigImages = {
+  body: loadArcherRigImage("body.png"),
+  bowArm: loadArcherRigImage("bow-arm.png"),
+  drawUpperArm: loadArcherRigImage("draw-upper-arm.png"),
+  drawForearm: loadArcherRigImage("draw-forearm-two-finger.png"),
+};
+
+const ENEMY_RIG_PART_FILES = Object.freeze({
+  grunt: Object.freeze([
+    "head", "torso", "pelvis",
+    "near_upper_arm", "near_forearm_hand",
+    "far_upper_arm", "far_forearm_hand",
+    "near_thigh", "near_shin_boot", "near_shin", "near_boot",
+    "far_thigh", "far_shin_boot", "far_shin", "far_boot",
+    "sword", "shield",
+  ]),
+  runner: Object.freeze([
+    "head", "torso", "pelvis",
+    "near_upper_arm", "near_forearm_hand",
+    "far_upper_arm", "far_forearm_hand",
+    "near_thigh", "near_shin_boot",
+    "far_thigh", "far_shin_boot",
+    "sword", "shield",
+  ]),
+});
+
+function loadEnemyRigResource(enemyId) {
+  const resource = {
+    enemyId,
+    manifest: null,
+    images: {},
+    ready: false,
+    error: null,
+  };
+  const base = new URL(`./assets/enemies/${enemyId}/rig/`, import.meta.url);
+  const manifestPromise = fetch(new URL("rig-manifest.json", base))
+    .then((response) => {
+      if (!response.ok) throw new Error(`Could not load ${enemyId} rig manifest`);
+      return response.json();
+    })
+    .then((manifest) => {
+      resource.manifest = manifest;
+    });
+  const imagePromises = ENEMY_RIG_PART_FILES[enemyId].map((partName) => new Promise((resolve, reject) => {
+    const image = new Image();
+    image.decoding = "async";
+    image.onload = resolve;
+    image.onerror = () => reject(new Error(`Could not load ${enemyId} rig part ${partName}`));
+    image.src = new URL(`${partName.replaceAll("_", "-")}.png`, base).href;
+    resource.images[partName] = image;
+  }));
+  resource.readyPromise = Promise.all([manifestPromise, ...imagePromises])
+    .then(() => { resource.ready = true; })
+    .catch((error) => { resource.error = error; });
+  return resource;
+}
+
+const enemyRigResources = {
+  grunt: loadEnemyRigResource("grunt"),
+  runner: loadEnemyRigResource("runner"),
+};
 
 canvas.width = W * DPR;
 canvas.height = H * DPR;
@@ -112,6 +203,30 @@ const sfx = {
   coin()     { tone(880, 0.06, "square", 0.05); setTimeout(() => tone(1245, 0.09, "square", 0.045), 60); },
 };
 
+const backgroundMusic = new Audio(new URL("./assets/music/medieval-ensemble-loop.ogg", import.meta.url));
+backgroundMusic.loop = true;
+backgroundMusic.preload = "auto";
+backgroundMusic.volume = 0.24;
+let musicMuted = false;
+let musicStarted = false;
+
+async function startBackgroundMusic() {
+  if (musicMuted || musicStarted) return;
+  try {
+    await backgroundMusic.play();
+    musicStarted = true;
+  } catch (error) {
+    // A later keyboard gesture retries if the browser blocks this one.
+  }
+}
+
+function toggleBackgroundMusic() {
+  musicMuted = !musicMuted;
+  backgroundMusic.muted = musicMuted;
+  if (!musicMuted) void startBackgroundMusic();
+  announce(musicMuted ? "Music muted" : "Music restored", 0.9);
+}
+
 const app = {
   screen: "start",
   model: createGameModel({ level: 1, gold: 40, trainingPoints: 0, arrowCharge: 3 }),
@@ -127,6 +242,8 @@ const app = {
   message: "",
   messageTimer: 0,
   shakeTimer: 0,
+  archerDrawProgress: 0,
+  archerShot: { active: false, elapsed: 0, released: false, shots: [] },
   phraseIndex: 0,
   levelRewardPaid: false,
   selectedEnemyIndex: 0,
@@ -200,6 +317,8 @@ function setupLevel() {
   app.enemies = [];
   app.arrows = [];
   app.particles = [];
+  app.archerDrawProgress = 0;
+  app.archerShot = { active: false, elapsed: 0, released: false, shots: [] };
   app.spawnTimer = 1.25;
   app.spawned = 0;
   app.defeatedThisLevel = 0;
@@ -283,11 +402,79 @@ function selectArrow(arrowId) {
   app.model.activeArrowId = arrowId;
 }
 
+function beginArcherShot(shots) {
+  app.archerDrawProgress = 1;
+  app.archerShot = { active: true, elapsed: 0, released: false, shots };
+}
+
+function updateArcherShot(dt) {
+  const animation = app.archerShot;
+  if (!animation.active) return;
+  animation.elapsed += dt;
+  if (!animation.released && animation.elapsed >= ARCHER_RELEASE_AT) {
+    for (const shot of animation.shots) {
+      launchArrow(shot.aimEnemy, shot.hits, shot.arrowId, shot.weaponDamage);
+    }
+    animation.released = true;
+    sfx.shoot();
+  }
+  if (animation.elapsed >= ARCHER_ANIMATION_END) {
+    app.archerDrawProgress = 0;
+    app.archerShot = { active: false, elapsed: 0, released: false, shots: [] };
+  }
+}
+
+function clamp01(value) {
+  return Math.max(0, Math.min(1, value));
+}
+
+function getArcherTargetProgress() {
+  if (app.screen !== "playing" || app.model.mode !== "combat" || !app.combatWord) return 0;
+  return clamp01(app.wordInput.length / app.combatWord.length);
+}
+
+function updateArcherDraw(dt) {
+  if (app.archerShot.active) return;
+  const target = getArcherTargetProgress();
+  const ease = 1 - Math.exp(-10 * dt);
+  app.archerDrawProgress += (target - app.archerDrawProgress) * ease;
+  if (Math.abs(target - app.archerDrawProgress) < 0.001) app.archerDrawProgress = target;
+}
+
+function getArcherReleaseProgress() {
+  if (!app.archerShot.active) return null;
+  return clamp01(app.archerShot.elapsed / ARCHER_ANIMATION_END);
+}
+
+function getCurrentArcherRigPose() {
+  return getArcherRigPose({
+    drawProgress: app.archerDrawProgress,
+    releaseProgress: getArcherReleaseProgress(),
+  });
+}
+
+function getArcherPoseName() {
+  const release = getArcherReleaseProgress();
+  if (release !== null) {
+    if (release < 0.2) return "string-snap";
+    if (release < 0.5) return "follow-through";
+    if (release < 0.82) return "recover";
+    return "nock";
+  }
+  if (app.archerDrawProgress < 0.04) return "nock";
+  if (app.archerDrawProgress < 0.96) return "drawing";
+  return "full-draw";
+}
+
 function fireArrow() {
   if (app.wordInput !== app.combatWord) {
     app.shakeTimer = 0.25;
     announce("Finish the combat word first", 1.1);
     sfx.error();
+    return;
+  }
+  if (app.archerShot.active) {
+    announce("The bowman is still loosing the last shaft", 0.7);
     return;
   }
   const targets = sortedTargets();
@@ -317,15 +504,16 @@ function fireArrow() {
   } else {
     hitTargets = [primary];
   }
-  // loose the shaft now — the blow lands only when it does (resolveArrowImpact)
-  launchArrow(primary, hitTargets, arrowId, weaponDamage);
+  const shots = [{ aimEnemy: primary, hits: hitTargets, arrowId, weaponDamage }];
 
   if (app.model.completedPhrases > 0 && app.model.completedPhrases % 2 === 0) {
     const bonus = sortedTargets().find((enemy) => !hitTargets.includes(enemy));
-    if (bonus) launchArrow(bonus, [bonus], "normal", weaponDamage);
+    if (bonus) shots.push({ aimEnemy: bonus, hits: [bonus], arrowId: "normal", weaponDamage });
   }
 
-  sfx.shoot();
+  // Hold the completed draw for a beat, then release the real projectile from
+  // the upward-aiming sprite on the animation's follow-through frame.
+  beginArcherShot(shots);
   nextCombatWord();
 }
 
@@ -333,7 +521,8 @@ function fireArrow() {
 // the mark after flightTime. it carries its victims and its damage; nothing is
 // dealt until the arrow actually arrives.
 function launchArrow(aimEnemy, hits, arrowId, weaponDamage) {
-  const launchX = 128, launchY = 500;
+  const fullDraw = getArcherRigPose({ drawProgress: 1, releaseProgress: null });
+  const { x: launchX, y: launchY } = archerPointToWorld(fullDraw.bowHand);
   const slow = aimEnemy.statuses.slow.active ? aimEnemy.statuses.slow.multiplier : 1;
   const targetY = GROUND - 58 + aimEnemy.laneOffset;
   const flightTime = Math.min(1.9, 0.95 + Math.abs(aimEnemy.x - launchX) / 700);
@@ -363,7 +552,8 @@ function resolveArrowImpact(arrow) {
 function defeatEnemy(enemy) {
   if (enemy.dyingTimer > 0) return;
   enemy.alive = false;
-  enemy.dyingTimer = 0.45;
+  enemy.deathDuration = getEnemyDeathDuration(enemy.id);
+  enemy.dyingTimer = enemy.deathDuration;
   app.model.gold += enemy.rewardGold;
   app.defeatedThisLevel += 1;
   addBurst(enemy.x, GROUND - 50, "#b03a2e", enemy.id === "boss" ? 26 : 14);
@@ -456,6 +646,8 @@ function typeCharacter(char) {
 function update(dt) {
   if (app.messageTimer > 0) app.messageTimer -= dt;
   if (app.shakeTimer > 0) app.shakeTimer -= dt;
+  updateArcherDraw(dt);
+  updateArcherShot(dt);
 
   for (const particle of app.particles) {
     particle.x += particle.vx * dt;
@@ -667,7 +859,8 @@ function drawCamps() {
   tent(70, 14, 30, "#e7dcc0", "#c8102e");
   tent(W - 26, 19, 40, "#c3cdea", "#e8c33a");
   tent(W - 72, 14, 30, "#b4c0e0", "#e8c33a");
-  drawStandard(16, "stgeorge");
+  // Keep the English standard clear of the illuminated page's left border.
+  drawStandard(48, "stgeorge");
 }
 
 function fleurDeLis(x, y, s, color) {
@@ -769,6 +962,93 @@ function drawTower() {
   ctx.fillText(TOWER_LEVELS[app.model.towerLevel - 1].name, bx0 + (bx1 - bx0) / 2, by + 26);
 }
 
+function archerRigReady() {
+  return Object.values(archerRigImages).every((image) => image.complete && image.naturalWidth > 0);
+}
+
+function drawRigLimb(image, from, to, height, endPadding = 3) {
+  const dx = to.x - from.x;
+  const dy = to.y - from.y;
+  const length = Math.hypot(dx, dy);
+  ctx.save();
+  ctx.translate(from.x, from.y);
+  ctx.rotate(Math.atan2(dy, dx));
+  ctx.drawImage(image, -2, -height / 2, length + endPadding, height);
+  ctx.restore();
+}
+
+function drawRigBowStave(geometry) {
+  const traceBow = () => {
+    ctx.beginPath();
+    ctx.moveTo(geometry.top.x, geometry.top.y);
+    ctx.quadraticCurveTo(
+      geometry.control.x,
+      geometry.control.y,
+      geometry.bottom.x,
+      geometry.bottom.y,
+    );
+    ctx.stroke();
+  };
+  ctx.lineCap = "round";
+  ctx.strokeStyle = "#3b2714";
+  ctx.lineWidth = 6;
+  traceBow();
+  ctx.strokeStyle = app.model.activeArrowId === "normal" ? "#c47c22" : ARROW_TINTS[app.model.activeArrowId] ?? "#c47c22";
+  ctx.lineWidth = 3.6;
+  traceBow();
+}
+
+function drawRigStringAndArrow(geometry, showArrow) {
+  ctx.strokeStyle = "#e8d77a";
+  ctx.lineWidth = 1.1;
+  ctx.beginPath();
+  ctx.moveTo(geometry.top.x, geometry.top.y);
+  ctx.lineTo(geometry.nock.x, geometry.nock.y);
+  ctx.lineTo(geometry.bottom.x, geometry.bottom.y);
+  ctx.stroke();
+
+  if (!showArrow) return;
+  const tail = { x: geometry.nock.x - geometry.ux * 12, y: geometry.nock.y - geometry.uy * 12 };
+  const tip = { x: geometry.grip.x + geometry.ux * 13, y: geometry.grip.y + geometry.uy * 13 };
+  ctx.strokeStyle = "#5b4325";
+  ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.moveTo(tail.x, tail.y); ctx.lineTo(tip.x, tip.y); ctx.stroke();
+  ctx.fillStyle = "#c9cdd4";
+  ctx.save();
+  ctx.translate(tip.x, tip.y);
+  ctx.rotate(geometry.aim);
+  ctx.beginPath(); ctx.moveTo(5, 0); ctx.lineTo(-3, -3); ctx.lineTo(-3, 3); ctx.closePath(); ctx.fill();
+  ctx.restore();
+}
+
+function drawSkeletalArcher(ready) {
+  if (!archerRigReady()) return false;
+  const pose = getCurrentArcherRigPose();
+  const showNockedArrow = !app.archerShot.active || app.archerShot.elapsed < ARCHER_RELEASE_AT;
+
+  ctx.save();
+  ctx.translate(ARCHER_RIG_ROOT.x, ARCHER_RIG_ROOT.y);
+  ctx.scale(ARCHER_WORLD_SCALE, ARCHER_WORLD_SCALE);
+  if (ready) {
+    ctx.shadowColor = "rgba(198,154,58,0.8)";
+    ctx.shadowBlur = 7;
+  }
+
+  drawRigLimb(archerRigImages.drawUpperArm, pose.drawShoulder, pose.drawElbow, 15, 4);
+
+  const bodyWidth = archerRigImages.body.naturalWidth * ARCHER_RIG_BODY_SCALE;
+  const bodyHeight = archerRigImages.body.naturalHeight * ARCHER_RIG_BODY_SCALE;
+  ctx.drawImage(archerRigImages.body, -bodyWidth / 2, -bodyHeight, bodyWidth, bodyHeight);
+
+  const bow = getLongbowGeometry(pose);
+  drawRigBowStave(bow);
+  drawRigLimb(archerRigImages.drawForearm, pose.drawElbow, pose.drawHand, 14, 5);
+  drawRigLimb(archerRigImages.bowArm, pose.bowShoulder, pose.bowHand, 14, 5);
+  drawRigStringAndArrow(bow, showNockedArrow);
+  ctx.restore();
+  return true;
+}
+
 function drawArcher() {
   const x = 98;
   const y = 486;
@@ -776,6 +1056,29 @@ function drawArcher() {
   const target = closestEnemy();
   const ready = app.screen === "playing" && app.model.mode === "combat" && app.wordInput === app.combatWord && app.combatWord.length > 0;
   const ang = target ? Math.max(-0.5, Math.min(0.45, Math.atan2(y + 40 - (g - 40), target.x - x) * -1)) : 0.32;
+
+  if (drawSkeletalArcher(ready)) return;
+
+  if (archerSprite.complete && archerSprite.naturalWidth > 0) {
+    ctx.save();
+    if (ready) {
+      ctx.shadowColor = "rgba(198,154,58,0.8)";
+      ctx.shadowBlur = 7;
+    }
+    ctx.drawImage(
+      archerSprite,
+      ARCHER_SPRITE_SOURCE.x,
+      ARCHER_SPRITE_SOURCE.y,
+      ARCHER_SPRITE_SOURCE.w,
+      ARCHER_SPRITE_SOURCE.h,
+      ARCHER_SPRITE_DEST.x,
+      ARCHER_SPRITE_DEST.y,
+      ARCHER_SPRITE_DEST.w,
+      ARCHER_SPRITE_DEST.h,
+    );
+    ctx.restore();
+    return;
+  }
 
   ctx.lineCap = "round";
 
@@ -854,7 +1157,147 @@ function drawArcher() {
   ctx.stroke();
 }
 
-// shared figure so the field and the start-screen legend match
+function currentEnemyRigPose(enemy) {
+  if (!getEnemyRigDefinition(enemy.id)) return null;
+  const deathDuration = enemy.deathDuration || getEnemyDeathDuration(enemy.id);
+  const deathProgress = enemy.dyingTimer > 0
+    ? Math.max(0, Math.min(1, 1 - enemy.dyingTimer / deathDuration))
+    : null;
+  return getEnemyRigPose(enemy.id, {
+    locomotionPhase: enemy.phase / (Math.PI * 2),
+    deathProgress,
+  });
+}
+
+function drawRigPartBetween(resource, partName, targetFrom, targetTo, sourceToOverride = null) {
+  const image = resource.images[partName];
+  const part = resource.manifest.parts[partName];
+  if (!image?.complete || !image.naturalWidth || !part) return;
+  const transform = getRigPartTransform({
+    part,
+    targetFrom,
+    targetTo,
+    sourceTo: sourceToOverride,
+  });
+  if (!transform) return;
+  const [sourceFromX, sourceFromY] = transform.sourceFrom;
+
+  ctx.save();
+  ctx.translate(targetFrom.x, targetFrom.y);
+  ctx.rotate(transform.rotation);
+  ctx.scale(transform.scale, transform.scale);
+  ctx.drawImage(image, -sourceFromX, -sourceFromY);
+  ctx.restore();
+}
+
+function drawIllustratedEnemyRig(enemy, pose) {
+  const resource = enemyRigResources[enemy.id];
+  if (!resource?.ready) return false;
+  const renderPlan = getEnemyRigRenderPlan(enemy.id);
+  const joints = pose.joints;
+  const pelvisBottom = {
+    x: joints.pelvis.x - Math.sin(pose.torsoRotation) * 6,
+    y: joints.pelvis.y + Math.cos(pose.torsoRotation) * 6,
+  };
+  const headPart = resource.manifest.parts.head;
+  const headPivot = headPart.additional_anchors?.head_pivot
+    ?? headPart.distal_anchor.xy;
+
+  ctx.save();
+  ctx.rotate(pose.bodyRotation);
+
+  // Far-side limbs establish depth behind the immutable torso.
+  drawRigPartBetween(resource, "far_thigh", joints.farHip, joints.farKnee);
+  if (enemy.id === "grunt") {
+    drawRigPartBetween(resource, "far_shin", joints.farKnee, joints.farAnkle);
+    drawRigPartBetween(
+      resource,
+      renderPlan.bootVisuals.far,
+      joints.farAnkle,
+      joints.farFoot,
+    );
+  } else {
+    drawRigPartBetween(
+      resource,
+      "far_shin_boot",
+      joints.farKnee,
+      joints.farFoot,
+      resource.manifest.parts.far_shin_boot.additional_anchors.foot_contact,
+    );
+  }
+  if (renderPlan.showWeaponArmWhileWalking && pose.mode !== "death") {
+    drawRigPartBetween(resource, "far_upper_arm", joints.farShoulder, joints.farElbow);
+    drawRigPartBetween(resource, "far_forearm_hand", joints.farElbow, joints.farWrist);
+  }
+  // The right sword arm is on the far side of this left-facing profile. Draw
+  // the blade before the torso, and omit the walking arm, so the body supplies
+  // the same occlusion a real side view would have.
+  if (renderPlan.weaponLayer === "behind_body") {
+    drawRigPartBetween(resource, "sword", pose.weaponGrip, pose.weaponTip);
+  }
+
+  drawRigPartBetween(resource, "torso", joints.neck, joints.pelvis);
+  drawRigPartBetween(resource, "pelvis", joints.pelvis, pelvisBottom);
+  if (renderPlan.weaponLayer === "between_body_and_shield") {
+    drawRigPartBetween(resource, "sword", pose.weaponGrip, pose.weaponTip);
+  }
+
+  // Once wounded, the previously hidden sword arm may cross the chest after
+  // releasing the weapon; this preserves the visible clutch-and-fall action.
+  if (pose.mode === "death") {
+    drawRigPartBetween(resource, "far_upper_arm", joints.farShoulder, joints.farElbow);
+    drawRigPartBetween(resource, "far_forearm_hand", joints.farElbow, joints.farWrist);
+  }
+
+  drawRigPartBetween(resource, "near_thigh", joints.nearHip, joints.nearKnee);
+  if (enemy.id === "grunt") {
+    drawRigPartBetween(resource, "near_shin", joints.nearKnee, joints.nearAnkle);
+    drawRigPartBetween(
+      resource,
+      renderPlan.bootVisuals.near,
+      joints.nearAnkle,
+      joints.nearFoot,
+    );
+  } else {
+    drawRigPartBetween(
+      resource,
+      "near_shin_boot",
+      joints.nearKnee,
+      joints.nearFoot,
+      resource.manifest.parts.near_shin_boot.additional_anchors.foot_contact,
+    );
+  }
+  drawRigPartBetween(
+    resource,
+    renderPlan.armVisuals.shieldUpper,
+    joints.nearShoulder,
+    joints.nearElbow,
+  );
+  drawRigPartBetween(
+    resource,
+    renderPlan.armVisuals.shieldForearm,
+    joints.nearElbow,
+    joints.nearWrist,
+  );
+
+  if (enemy.id === "grunt" || enemy.id === "runner") {
+    drawRigPartBetween(
+      resource,
+      "shield",
+      pose.shieldGrip,
+      {
+        x: pose.shieldGrip.x + 1,
+        y: pose.shieldGrip.y + (enemy.id === "grunt" ? 13 : 12.5),
+      },
+    );
+  }
+  drawRigPartBetween(resource, "head", joints.neck, joints.head, headPivot);
+
+  ctx.restore();
+  return true;
+}
+
+// shared fallback figure so unillustrated foes and the start-screen legend match
 function drawEnemyFigure(enemy, knockLunge) {
   const pig = ENEMY_PIGMENTS[enemy.id] ?? { body: "#8b8272", trim: "#4c443a" };
   const swing = knockLunge > 0 ? 0 : Math.sin(enemy.phase) * 0.55;
@@ -942,13 +1385,22 @@ function drawEnemy(enemy) {
   const knockLunge = knocking ? Math.abs(Math.sin(enemy.attackTimer / 1.2 * Math.PI)) : 0;
   ctx.translate(enemy.x - knockLunge * 7, GROUND + enemy.laneOffset * 0.4);
 
-  if (enemy.dyingTimer > 0) {
-    const k = 1 - enemy.dyingTimer / 0.45;
+  const rigPose = currentEnemyRigPose(enemy);
+  const rigReady = Boolean(rigPose && enemyRigResources[enemy.id]?.ready);
+  if (enemy.dyingTimer > 0 && rigReady) {
+    const progress = rigPose.deathProgress;
+    const fade = Math.max(0, Math.min(1, (progress - 0.84) / 0.16));
+    ctx.globalAlpha = 1 - fade * 0.78;
+  } else if (enemy.dyingTimer > 0) {
+    const duration = enemy.deathDuration || 0.45;
+    const k = 1 - enemy.dyingTimer / duration;
     ctx.globalAlpha = Math.max(0, 1 - k * 1.15);
-    ctx.rotate(k * 1.5); // topple backward
+    ctx.rotate(k * 1.5); // fallback topple for enemies not yet illustrated
   }
   ctx.scale(scale, scale);
-  drawEnemyFigure(enemy, knockLunge);
+  if (!rigReady || !drawIllustratedEnemyRig(enemy, rigPose)) {
+    drawEnemyFigure(enemy, knockLunge);
+  }
 
   if (enemy.dyingTimer <= 0 && enemy.id !== "boss") {
     // HP pips in dried vermilion; a thin bar for the great-of-heart
@@ -1008,15 +1460,19 @@ function drawArrows() {
     ctx.translate(arrow.x, arrow.y);
     ctx.rotate(Math.atan2(vyNow, arrow.vx));
     ctx.strokeStyle = ARROW_TINTS[arrow.arrowId] ?? "#5b4325";
-    ctx.lineWidth = 2;
-    ctx.beginPath(); ctx.moveTo(-14, 0); ctx.lineTo(2, 0); ctx.stroke();
+    ctx.lineWidth = 2.2;
+    ctx.lineCap = "round";
+    // A 42 px silhouette (formerly 18 px) keeps the projectile readable in flight.
+    ctx.beginPath(); ctx.moveTo(-32, 0); ctx.lineTo(3, 0); ctx.stroke();
     ctx.fillStyle = "#c9cdd4";
-    ctx.beginPath(); ctx.moveTo(4, 0); ctx.lineTo(-1, -2.8); ctx.lineTo(-1, 2.8); ctx.closePath(); ctx.fill();
+    ctx.beginPath(); ctx.moveTo(10, 0); ctx.lineTo(1, -4); ctx.lineTo(1, 4); ctx.closePath(); ctx.fill();
     ctx.fillStyle = "#e8e0d0";
-    ctx.beginPath(); ctx.moveTo(-14, 0); ctx.lineTo(-11, -3); ctx.lineTo(-8, 0); ctx.lineTo(-11, 3); ctx.closePath(); ctx.fill();
+    ctx.beginPath();
+    ctx.moveTo(-32, 0); ctx.lineTo(-27, -4); ctx.lineTo(-20, -3); ctx.lineTo(-24, 0);
+    ctx.lineTo(-20, 3); ctx.lineTo(-27, 4); ctx.closePath(); ctx.fill();
     if (arrow.arrowId === "fire") {
       ctx.fillStyle = "rgba(163,48,29,0.8)";
-      ctx.beginPath(); ctx.arc(3, 0, 3, 0, 7); ctx.fill();
+      ctx.beginPath(); ctx.arc(7, 0, 4, 0, 7); ctx.fill();
     }
     ctx.restore();
   }
@@ -1099,7 +1555,7 @@ function drawPanels() {
   if (mode === "combat" && combatReady) {
     const pulse = 0.6 + 0.4 * Math.sin(performance.now() / 160);
     ctx.fillStyle = "rgba(140,100,20," + pulse.toFixed(2) + ")";
-    ctx.fillText("press SPACE to loose the arrow", cx, 162);
+    ctx.fillText("press SPACE or ENTER to loose the arrow", cx, 162);
   } else if (mode === "combat") {
     ctx.fillStyle = "rgba(70,60,45,0.75)";
     ctx.fillText("type the combat word · TAB to train for Training Points", cx, 162);
@@ -1422,12 +1878,12 @@ function draw() {
     drawTower();
     drawArcher();
     drawOverlay("Longbow Training", [
-      "Type the combat word — SPACE looses an arrow at the nearest foe.",
+      "Type the combat word — SPACE or ENTER looses an arrow at the nearest foe.",
       "TAB turns to the training phrase: finish it for Training Points and Arrow Charge,",
       "but the enemy keeps marching while you study.",
       "1 Normal Arrow · 2 Fire Arrow burns through mail · 3 Piercing Arrow strikes three.",
       "Spend Gold and Training Points in the armory after every level.",
-      "",
+      "F2 mutes or restores the medieval ensemble music.",
     ], "press ENTER to begin the campaign");
     drawLegend(430);
     drawPageBorder();
@@ -1496,6 +1952,13 @@ window.addEventListener("keydown", (event) => {
   if (event.metaKey || event.ctrlKey || event.altKey) return; // leave browser shortcuts alone
   if (AC && AC.state === "suspended") AC.resume();
 
+  if (event.key === "F2") {
+    event.preventDefault();
+    toggleBackgroundMusic();
+    return;
+  }
+  if (!musicMuted) void startBackgroundMusic();
+
   if (app.screen === "start" || app.screen === "gameover" || app.screen === "victory") {
     if (event.key === "Enter") startCampaign();
     return;
@@ -1523,10 +1986,10 @@ window.addEventListener("keydown", (event) => {
     }
     return;
   }
-  if (event.key === " ") {
+  if (event.key === " " || event.key === "Enter") {
     event.preventDefault();
-    if (app.model.mode === "combat") fireArrow();
-    else typeCharacter(" ");
+    if (app.model.mode === "combat") { fireArrow(); return; }
+    if (event.key === " ") typeCharacter(" "); // Space is a real character in a phrase; Enter is not
     return;
   }
   if (event.key.length === 1 && /^[a-z]$/i.test(event.key)) {
@@ -1548,6 +2011,74 @@ window.advanceTime = (ms) => {
   for (let i = 0; i < steps; i += 1) update(1 / 60);
   draw();
 };
+
+function archerPointToWorld(point) {
+  const scaled = scaleArcherRigPoint(point);
+  return {
+    x: Number((ARCHER_RIG_ROOT.x + scaled.x).toFixed(2)),
+    y: Number((ARCHER_RIG_ROOT.y + scaled.y).toFixed(2)),
+  };
+}
+
+function getArcherTextState() {
+  const pose = getCurrentArcherRigPose();
+  const releaseProgress = getArcherReleaseProgress();
+  return {
+    pose: getArcherPoseName(),
+    animationMode: "skeletal",
+    drawProgress: Number(app.archerDrawProgress.toFixed(3)),
+    releaseProgress: releaseProgress === null ? null : Number(releaseProgress.toFixed(3)),
+    shotActive: app.archerShot.active,
+    released: app.archerShot.released,
+    assetsReady: archerRigReady(),
+    displayScale: ARCHER_WORLD_SCALE,
+    root: { ...ARCHER_RIG_ROOT },
+    head: archerPointToWorld(pose.head),
+    bowShoulder: archerPointToWorld(pose.bowShoulder),
+    drawShoulder: archerPointToWorld(pose.drawShoulder),
+    bowHand: archerPointToWorld(pose.bowHand),
+    drawHand: archerPointToWorld(pose.drawHand),
+    drawElbow: archerPointToWorld(pose.drawElbow),
+  };
+}
+
+function enemyRigPointToWorld(enemy, pose, point) {
+  const cos = Math.cos(pose.bodyRotation);
+  const sin = Math.sin(pose.bodyRotation);
+  const rotated = {
+    x: point.x * cos - point.y * sin,
+    y: point.x * sin + point.y * cos,
+  };
+  const scale = 1.4;
+  return {
+    x: Number((enemy.x + rotated.x * scale).toFixed(2)),
+    y: Number((GROUND + enemy.laneOffset * 0.4 + rotated.y * scale).toFixed(2)),
+  };
+}
+
+function getEnemyAnimationTextState() {
+  return app.enemies
+    .filter((enemy) => getEnemyRigDefinition(enemy.id) && (enemy.alive || enemy.dyingTimer > 0))
+    .map((enemy) => {
+      const pose = currentEnemyRigPose(enemy);
+      return {
+        id: enemy.id,
+        animationMode: "skeletal",
+        assetsReady: Boolean(enemyRigResources[enemy.id]?.ready),
+        mode: pose.mode,
+        deathProgress: pose.deathProgress === undefined
+          ? null
+          : Number(pose.deathProgress.toFixed(3)),
+        bodyRotation: Number(pose.bodyRotation.toFixed(3)),
+        weaponReleased: pose.weaponReleased,
+        root: enemyRigPointToWorld(enemy, pose, pose.root),
+        joints: Object.fromEntries(Object.entries(pose.joints).map(([name, point]) => [
+          name,
+          enemyRigPointToWorld(enemy, pose, point),
+        ])),
+      };
+    });
+}
 
 window.render_game_to_text = () => JSON.stringify({
   screen: app.screen,
@@ -1573,6 +2104,13 @@ window.render_game_to_text = () => JSON.stringify({
     tier: app.model.longbowmanTier,
     activeArrowId: app.model.activeArrowId,
   },
+  archer: getArcherTextState(),
+  enemyAnimations: getEnemyAnimationTextState(),
+  arrows: app.arrows.map((arrow) => ({
+    x: Math.round(arrow.x),
+    y: Math.round(arrow.y),
+    type: arrow.arrowId,
+  })),
   enemies: livingEnemies().map((enemy) => ({
     id: enemy.id,
     name: enemy.name,
@@ -1581,6 +2119,12 @@ window.render_game_to_text = () => JSON.stringify({
     armor: enemy.armor,
     burning: enemy.statuses.burning.active,
   })),
+  audio: {
+    musicMuted,
+    musicStarted,
+    musicPlaying: !backgroundMusic.paused && !backgroundMusic.ended,
+    arrangement: ["Baroque alto recorder", "folk harp", "bowed psaltery"],
+  },
 });
 
 window.__game = {
@@ -1591,6 +2135,7 @@ window.__game = {
   fireArrow,
   typeCharacter,
   update,
+  render: draw,
   renderText: window.render_game_to_text,
 };
 

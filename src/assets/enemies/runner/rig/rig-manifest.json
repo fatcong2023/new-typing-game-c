@@ -1,0 +1,153 @@
+{
+  "character": "runner",
+  "version": 1,
+  "format": "2d-cutout-skeleton",
+  "coordinate_system": {
+    "origin": "top-left",
+    "x_positive": "right",
+    "y_positive": "down",
+    "units": "source pixels"
+  },
+  "identity_source": "../runner-concept-v1.png",
+  "generated_source": "parts-sheet-chroma.png",
+  "transparent_source": "parts-sheet.png",
+  "source_sheet_size": [1024, 1536],
+  "source_scale_rule": "Keep every part at this common source-pixel scale. Apply character size only once at the assembled root transform; never normalize individual alpha bounds.",
+  "limb_reference_direction": "All long limbs are stored horizontally with proximal joint on the left and distal joint on the right.",
+  "foot_root_convention": {
+    "canonical_world_root": [0, 0],
+    "definition": "The canonical world root is the lowest opaque sole point of the currently planted boot after all joint transforms. For the baseline left-running pose, use near-shin-boot.foot_contact.",
+    "rule": "Never derive the root from a per-frame alpha bounding box. Keep the same source scale and place the selected foot_contact on the world ground line.",
+    "baseline_planted_part": "near-shin-boot.png"
+  },
+  "recommended_layer_order_back_to_front": [
+    "far-upper-arm.png",
+    "far-forearm-hand.png",
+    "far-thigh.png",
+    "far-shin-boot.png",
+    "torso.png",
+    "pelvis.png",
+    "near-thigh.png",
+    "near-shin-boot.png",
+    "near-upper-arm.png",
+    "near-forearm-hand.png",
+    "sword.png",
+    "shield.png",
+    "head.png"
+  ],
+  "parts": {
+    "head": {
+      "file": "head.png",
+      "canvas_size": [308, 317],
+      "proximal_anchor": {"name": "neck_base", "xy": [164, 278]},
+      "distal_anchor": {"name": "head_center", "xy": [162, 147]},
+      "suggested_thickness": 146,
+      "source": "parts-sheet.png component 1; identity from runner-concept-v1.png",
+      "additional_anchors": {"crown": [162, 42], "face_direction_point": [55, 158]}
+    },
+    "torso": {
+      "file": "torso.png",
+      "canvas_size": [305, 347],
+      "proximal_anchor": {"name": "neck_opening", "xy": [152, 45]},
+      "distal_anchor": {"name": "waist", "xy": [152, 304]},
+      "suggested_thickness": 210,
+      "source": "parts-sheet.png component 2; identity from runner-concept-v1.png",
+      "additional_anchors": {"near_shoulder": [257, 119], "far_shoulder": [48, 119]}
+    },
+    "pelvis": {
+      "file": "pelvis.png",
+      "canvas_size": [341, 281],
+      "proximal_anchor": {"name": "waist", "xy": [171, 45]},
+      "distal_anchor": {"name": "pelvis_center", "xy": [171, 148]},
+      "suggested_thickness": 198,
+      "source": "parts-sheet.png component 3; identity from runner-concept-v1.png",
+      "additional_anchors": {"near_hip": [138, 151], "far_hip": [204, 151]}
+    },
+    "near_upper_arm": {
+      "file": "near-upper-arm.png",
+      "canvas_size": [297, 198],
+      "proximal_anchor": {"name": "shoulder", "xy": [48, 99]},
+      "distal_anchor": {"name": "elbow", "xy": [249, 99]},
+      "suggested_thickness": 116,
+      "source": "parts-sheet.png component 4; identity from runner-concept-v1.png"
+    },
+    "near_forearm_hand": {
+      "file": "near-forearm-hand.png",
+      "canvas_size": [327, 177],
+      "proximal_anchor": {"name": "elbow", "xy": [48, 89]},
+      "distal_anchor": {"name": "sword_grip", "xy": [272, 90]},
+      "suggested_thickness": 91,
+      "source": "parts-sheet.png component 5, horizontally mirrored during extraction; identity from runner-concept-v1.png",
+      "additional_anchors": {"wrist": [230, 89]}
+    },
+    "far_upper_arm": {
+      "file": "far-upper-arm.png",
+      "canvas_size": [340, 186],
+      "proximal_anchor": {"name": "shoulder", "xy": [48, 93]},
+      "distal_anchor": {"name": "elbow", "xy": [292, 93]},
+      "suggested_thickness": 104,
+      "source": "parts-sheet.png component 6; identity from runner-concept-v1.png"
+    },
+    "far_forearm_hand": {
+      "file": "far-forearm-hand.png",
+      "canvas_size": [306, 164],
+      "proximal_anchor": {"name": "elbow", "xy": [48, 82]},
+      "distal_anchor": {"name": "hand_center", "xy": [254, 82]},
+      "suggested_thickness": 84,
+      "source": "parts-sheet.png component 7, horizontally mirrored during extraction; identity from runner-concept-v1.png",
+      "additional_anchors": {"wrist": [222, 82]}
+    },
+    "near_thigh": {
+      "file": "near-thigh.png",
+      "canvas_size": [309, 214],
+      "proximal_anchor": {"name": "hip", "xy": [48, 107]},
+      "distal_anchor": {"name": "knee", "xy": [261, 107]},
+      "suggested_thickness": 132,
+      "source": "parts-sheet.png component 8; identity from runner-concept-v1.png"
+    },
+    "near_shin_boot": {
+      "file": "near-shin-boot.png",
+      "canvas_size": [354, 234],
+      "proximal_anchor": {"name": "knee", "xy": [48, 117]},
+      "distal_anchor": {"name": "ankle", "xy": [186, 119]},
+      "suggested_thickness": 126,
+      "source": "parts-sheet.png component 9; identity from runner-concept-v1.png",
+      "additional_anchors": {"boot_toe": [311, 119], "foot_contact": [302, 201]}
+    },
+    "far_thigh": {
+      "file": "far-thigh.png",
+      "canvas_size": [307, 212],
+      "proximal_anchor": {"name": "hip", "xy": [48, 106]},
+      "distal_anchor": {"name": "knee", "xy": [259, 106]},
+      "suggested_thickness": 130,
+      "source": "parts-sheet.png component 10; identity from runner-concept-v1.png"
+    },
+    "far_shin_boot": {
+      "file": "far-shin-boot.png",
+      "canvas_size": [323, 251],
+      "proximal_anchor": {"name": "knee", "xy": [48, 126]},
+      "distal_anchor": {"name": "ankle", "xy": [160, 127]},
+      "suggested_thickness": 132,
+      "source": "parts-sheet.png component 11; identity from runner-concept-v1.png",
+      "additional_anchors": {"boot_toe": [278, 128], "foot_contact": [265, 218]}
+    },
+    "sword": {
+      "file": "sword.png",
+      "canvas_size": [385, 164],
+      "proximal_anchor": {"name": "grip", "xy": [302, 82]},
+      "distal_anchor": {"name": "blade_tip", "xy": [34, 82]},
+      "suggested_thickness": 22,
+      "source": "parts-sheet.png component 12; identity from runner-concept-v1.png",
+      "additional_anchors": {"guard": [254, 82], "pommel": [351, 82]}
+    },
+    "shield": {
+      "file": "shield.png",
+      "canvas_size": [583, 863],
+      "proximal_anchor": {"name": "grip", "xy": [292, 432]},
+      "distal_anchor": {"name": "lower_tip", "xy": [292, 843]},
+      "suggested_thickness": 35,
+      "source": "generated from the approved Runner palette and Grunt heraldry reference",
+      "additional_anchors": {"shield_center": [292, 432], "top_center": [292, 20]}
+    }
+  }
+}
