@@ -15,18 +15,20 @@ This version uses JavaScript modules, so serve the folder instead of opening the
 HTML file directly:
 
 ```bash
-python3 -m http.server 8000
+npm start
 ```
 
-Then open `http://localhost:8000`.
+On this Mac, open `http://localhost:8000`. Other devices on the same local
+network can open `http://<this-Mac's-LAN-IP>:8000`; find the current Wi-Fi
+address with `ipconfig getifaddr en0`.
 
 ## Controls
 
 | Key | Action |
 | --- | --- |
-| Enter | start / restart / leave the shop |
+| Enter | start / restart / leave the shop · fire in combat mode |
 | letters | type in the active lane |
-| Space | fire in combat mode, type a space in enrichment mode |
+| Space | fire in combat mode (or Enter), type a space in enrichment mode |
 | Backspace | delete the last typed character |
 | Tab | switch between combat word and enrichment phrase |
 | 1 | Normal Arrow |
@@ -35,6 +37,7 @@ Then open `http://localhost:8000`.
 | 4 | Ice Arrow, once unlocked (Tier 4) |
 | 5 | Armor Breaker, once unlocked (Tier 5) |
 | 6 | Explosive Arrow, once unlocked (Tier 6) |
+| F2 | mute / restore the background music |
 | 1–4 in the shop | buy the numbered ware |
 
 Shortcuts held with Cmd/Ctrl/Alt are left to the browser.
@@ -53,9 +56,13 @@ Shortcuts held with Cmd/Ctrl/Alt are left to the browser.
   (refused while the walls are whole), and special arrow refills.
 - Barricade path from Sharpened Stakes to Dragonsteel Abatis.
 - Longbowman path from Longbow through Silver/Golden Bow to Fire Musket.
+- Fixed-base skeletal longbow animation: the body, head, and feet keep one
+  anchor while rigged arms, bow, string, and arrow interpolate continuously.
 - Illuminated-manuscript presentation: vellum page, gilt borders and corner
   lozenges, St George's cross on the line's standard, fleur-de-lis heater shields,
-  and a small WebAudio synth for arrows, coins, horns, and typing.
+  a small WebAudio synth for arrows, coins, horns, and typing, and a looping
+  84 BPM medieval ensemble score rendered from VCSL's real Baroque Alto
+  Recorder, Folk Harp, and Bowed Psaltery samples.
 - Browser playtest hooks: `window.render_game_to_text()` and
   `window.advanceTime(ms)`.
 

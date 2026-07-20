@@ -1,0 +1,192 @@
+{
+  "character": "grunt",
+  "version": 1,
+  "format": "2d-cutout-skeleton",
+  "coordinate_system": {
+    "origin": "top-left",
+    "x_positive": "right",
+    "y_positive": "down",
+    "units": "source pixels"
+  },
+  "identity_source": "../grunt-concept-v2-large-shield.png",
+  "generated_source": "parts-sheet.png",
+  "transparent_source": "parts-sheet.png",
+  "source_sheet_size": [1254, 1254],
+  "source_scale_rule": "Keep every part at this common source-pixel scale. Apply character size only once at the assembled root transform; never normalize individual alpha bounds.",
+  "limb_reference_direction": "All long limbs are stored horizontally with proximal joint on the left and distal joint on the right.",
+  "foot_root_convention": {
+    "canonical_world_root": [0, 0],
+    "definition": "The canonical world root is the lowest opaque sole point of the currently planted boot after all joint transforms. For the baseline left-facing pose, use near-boot.foot_contact.",
+    "rule": "Never derive the root from a per-frame alpha bounding box. Keep the same source scale and place the selected foot_contact on the world ground line.",
+    "baseline_planted_part": "near-boot.png",
+    "concept_canvas": [1024, 1536],
+    "concept_alpha_bounds": [38, 183, 779, 1326],
+    "concept_ground_root": [706, 1326]
+  },
+  "recommended_layer_order_back_to_front": [
+    "far-upper-arm.png",
+    "far-forearm-hand.png",
+    "far-thigh.png",
+    "far-shin.png",
+    "far-boot.png",
+    "torso.png",
+    "pelvis.png",
+    "near-thigh.png",
+    "near-shin.png",
+    "near-boot.png",
+    "near-upper-arm.png",
+    "near-forearm-hand.png",
+    "sword.png",
+    "shield.png",
+    "head.png"
+  ],
+  "parts": {
+    "head": {
+      "file": "head.png",
+      "canvas_size": [237, 249],
+      "proximal_anchor": {"name": "neck", "xy": [132, 224]},
+      "distal_anchor": {"name": "face_direction", "xy": [58, 122]},
+      "suggested_thickness": 112,
+      "source": "parts-sheet.png component bounds [90, 110, 303, 335]; identity from grunt-concept-v2-large-shield.png",
+      "additional_anchors": {"head_pivot": [123, 144], "neck_overlap_bottom": [132, 232]}
+    },
+    "torso": {
+      "file": "torso.png",
+      "canvas_size": [250, 302],
+      "proximal_anchor": {"name": "neck", "xy": [124, 24]},
+      "distal_anchor": {"name": "waist", "xy": [125, 277]},
+      "suggested_thickness": 190,
+      "source": "parts-sheet.png component bounds [391, 101, 617, 379]; identity from grunt-concept-v2-large-shield.png",
+      "additional_anchors": {"near_shoulder": [214, 87], "far_shoulder": [37, 87], "torso_center": [125, 158]}
+    },
+    "pelvis": {
+      "file": "pelvis.png",
+      "canvas_size": [260, 213],
+      "proximal_anchor": {"name": "waist", "xy": [130, 25]},
+      "distal_anchor": {"name": "hip_center", "xy": [130, 127]},
+      "suggested_thickness": 170,
+      "source": "parts-sheet.png component bounds [678, 181, 914, 370]; identity from grunt-concept-v2-large-shield.png",
+      "additional_anchors": {"near_hip": [207, 125], "far_hip": [53, 125], "pelvis_center": [130, 109]}
+    },
+    "near_upper_arm": {
+      "file": "near-upper-arm.png",
+      "canvas_size": [222, 127],
+      "proximal_anchor": {"name": "shoulder", "xy": [24, 64]},
+      "distal_anchor": {"name": "elbow", "xy": [198, 64]},
+      "suggested_thickness": 78,
+      "source": "parts-sheet.png component bounds [77, 505, 275, 608]; identity from grunt-concept-v2-large-shield.png"
+    },
+    "near_forearm_hand": {
+      "file": "near-forearm-hand.png",
+      "canvas_size": [242, 145],
+      "proximal_anchor": {"name": "elbow", "xy": [24, 72]},
+      "distal_anchor": {"name": "hand", "xy": [201, 72]},
+      "suggested_thickness": 70,
+      "source": "parts-sheet.png component bounds [375, 502, 593, 623], horizontally mirrored during extraction; identity from grunt-concept-v2-large-shield.png",
+      "additional_anchors": {"sword_grip": [207, 72], "wrist": [173, 72]}
+    },
+    "far_upper_arm": {
+      "file": "far-upper-arm.png",
+      "canvas_size": [227, 122],
+      "proximal_anchor": {"name": "shoulder", "xy": [24, 61]},
+      "distal_anchor": {"name": "elbow", "xy": [203, 61]},
+      "suggested_thickness": 74,
+      "source": "parts-sheet.png component bounds [683, 515, 886, 613]; identity from grunt-concept-v2-large-shield.png"
+    },
+    "far_forearm_hand": {
+      "file": "far-forearm-hand.png",
+      "canvas_size": [228, 128],
+      "proximal_anchor": {"name": "elbow", "xy": [24, 64]},
+      "distal_anchor": {"name": "hand", "xy": [197, 64]},
+      "suggested_thickness": 68,
+      "source": "parts-sheet.png component bounds [976, 521, 1180, 625]; identity from grunt-concept-v2-large-shield.png",
+      "additional_anchors": {"shield_grip": [207, 64], "wrist": [170, 64]}
+    },
+    "near_thigh": {
+      "file": "near-thigh.png",
+      "canvas_size": [243, 124],
+      "proximal_anchor": {"name": "hip", "xy": [25, 62]},
+      "distal_anchor": {"name": "knee", "xy": [218, 62]},
+      "suggested_thickness": 82,
+      "source": "parts-sheet.png component bounds [68, 783, 287, 883]; identity from grunt-concept-v2-large-shield.png"
+    },
+    "near_shin_boot": {
+      "file": "near-shin-boot.png",
+      "canvas_size": [214, 189],
+      "proximal_anchor": {"name": "knee", "xy": [24, 61]},
+      "distal_anchor": {"name": "ankle", "xy": [151, 79]},
+      "suggested_thickness": 78,
+      "source": "parts-sheet.png component bounds [395, 782, 585, 947]; identity from grunt-concept-v2-large-shield.png",
+      "additional_anchors": {"foot_contact": [148, 172], "boot_toe": [59, 166]}
+    },
+    "near_shin": {
+      "file": "near-shin.png",
+      "canvas_size": [161, 111],
+      "proximal_anchor": {"name": "knee", "xy": [18, 55]},
+      "distal_anchor": {"name": "ankle", "xy": [145, 73]},
+      "suggested_thickness": 78,
+      "source": "masked from approved near-shin-boot.png with an overlapping ankle cuff"
+    },
+    "near_boot": {
+      "file": "near-boot.png",
+      "canvas_size": [171, 170],
+      "proximal_anchor": {"name": "ankle", "xy": [114, 66]},
+      "distal_anchor": {"name": "foot_contact", "xy": [111, 159]},
+      "suggested_thickness": 78,
+      "source": "masked from approved near-shin-boot.png with an overlapping ankle cuff",
+      "additional_anchors": {"boot_toe": [22, 153]}
+    },
+    "far_thigh": {
+      "file": "far-thigh.png",
+      "canvas_size": [226, 120],
+      "proximal_anchor": {"name": "hip", "xy": [24, 60]},
+      "distal_anchor": {"name": "knee", "xy": [202, 60]},
+      "suggested_thickness": 76,
+      "source": "parts-sheet.png component bounds [676, 791, 878, 887]; identity from grunt-concept-v2-large-shield.png"
+    },
+    "far_shin_boot": {
+      "file": "far-shin-boot.png",
+      "canvas_size": [194, 178],
+      "proximal_anchor": {"name": "knee", "xy": [24, 56]},
+      "distal_anchor": {"name": "ankle", "xy": [139, 76]},
+      "suggested_thickness": 72,
+      "source": "parts-sheet.png component bounds [971, 784, 1141, 938]; identity from grunt-concept-v2-large-shield.png",
+      "additional_anchors": {"foot_contact": [128, 161], "boot_toe": [78, 154]}
+    },
+    "far_shin": {
+      "file": "far-shin.png",
+      "canvas_size": [150, 109],
+      "proximal_anchor": {"name": "knee", "xy": [18, 50]},
+      "distal_anchor": {"name": "ankle", "xy": [133, 70]},
+      "suggested_thickness": 72,
+      "source": "masked from approved far-shin-boot.png with an overlapping ankle cuff"
+    },
+    "far_boot": {
+      "file": "far-boot.png",
+      "canvas_size": [132, 154],
+      "proximal_anchor": {"name": "ankle", "xy": [82, 58]},
+      "distal_anchor": {"name": "foot_contact", "xy": [71, 143]},
+      "suggested_thickness": 72,
+      "source": "masked from approved far-shin-boot.png with an overlapping ankle cuff",
+      "additional_anchors": {"boot_toe": [21, 136]}
+    },
+    "sword": {
+      "file": "sword.png",
+      "canvas_size": [395, 128],
+      "proximal_anchor": {"name": "grip", "xy": [347, 64]},
+      "distal_anchor": {"name": "blade_tip", "xy": [14, 64]},
+      "suggested_thickness": 14,
+      "source": "parts-sheet.png component bounds [79, 1055, 450, 1159]; identity from grunt-concept-v2-large-shield.png",
+      "additional_anchors": {"guard_center": [304, 64], "pommel": [382, 64]}
+    },
+    "shield": {
+      "file": "shield.png",
+      "canvas_size": [195, 277],
+      "proximal_anchor": {"name": "grip", "xy": [98, 139]},
+      "distal_anchor": {"name": "lower_tip", "xy": [98, 253]},
+      "suggested_thickness": 28,
+      "source": "parts-sheet.png component bounds [990, 125, 1161, 378]; identity from grunt-concept-v2-large-shield.png",
+      "additional_anchors": {"shield_center": [98, 139], "top_center": [98, 18]}
+    }
+  }
+}
