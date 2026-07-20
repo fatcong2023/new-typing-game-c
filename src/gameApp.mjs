@@ -1163,13 +1163,18 @@ function currentEnemyRigPose(enemy) {
   const deathProgress = enemy.dyingTimer > 0
     ? Math.max(0, Math.min(1, 1 - enemy.dyingTimer / deathDuration))
     : null;
+  // At the barricade the march phase stops advancing; a frozen mid-stride pose
+  // reads as a broken statue. Phase 0 is the gait's widest two-feet-planted
+  // stance — a stable fighting posture for the knock animation.
+  const knocking = deathProgress === null && enemy.alive && enemy.x <= STOP_X;
   return getEnemyRigPose(enemy.id, {
-    locomotionPhase: enemy.phase / (Math.PI * 2),
+    locomotionPhase: knocking ? 0 : enemy.phase / (Math.PI * 2),
     deathProgress,
   });
 }
 
 function drawRigPartBetween(resource, partName, targetFrom, targetTo, sourceToOverride = null) {
+  if (window.__skipParts?.includes(partName)) return; // temporary debug bisect
   const image = resource.images[partName];
   const part = resource.manifest.parts[partName];
   if (!image?.complete || !image.naturalWidth || !part) return;
@@ -1225,15 +1230,29 @@ function drawIllustratedEnemyRig(enemy, pose) {
       resource.manifest.parts.far_shin_boot.additional_anchors.foot_contact,
     );
   }
+  // The far sword arm draws entirely BEHIND the torso — real side-view
+  // Z-layering. Order: upper arm, then sword, then forearm, so the palm-side
+  // fist wraps over the grip. The torso painted next occludes the upper arm,
+  // most of the forearm and the hilt; only what clears the body's front
+  // silhouette (the fist and the blade) stays visible.
   if (renderPlan.showWeaponArmWhileWalking && pose.mode !== "death") {
-    drawRigPartBetween(resource, "far_upper_arm", joints.farShoulder, joints.farElbow);
-    drawRigPartBetween(resource, "far_forearm_hand", joints.farElbow, joints.farWrist);
+    drawRigPartBetween(
+      resource,
+      renderPlan.weaponArmVisuals?.upper ?? "far_upper_arm",
+      joints.farShoulder,
+      joints.farElbow,
+    );
   }
-  // The right sword arm is on the far side of this left-facing profile. Draw
-  // the blade before the torso, and omit the walking arm, so the body supplies
-  // the same occlusion a real side view would have.
   if (renderPlan.weaponLayer === "behind_body") {
     drawRigPartBetween(resource, "sword", pose.weaponGrip, pose.weaponTip);
+  }
+  if (renderPlan.showWeaponArmWhileWalking && pose.mode !== "death") {
+    drawRigPartBetween(
+      resource,
+      renderPlan.weaponArmVisuals?.forearm ?? "far_forearm_hand",
+      joints.farElbow,
+      joints.farWrist,
+    );
   }
 
   drawRigPartBetween(resource, "torso", joints.neck, joints.pelvis);
@@ -1286,8 +1305,10 @@ function drawIllustratedEnemyRig(enemy, pose) {
       "shield",
       pose.shieldGrip,
       {
+        // grunt: a touch smaller than before, matching the concept's chest-to-
+        // belt proportions and freeing the sword hand below its taper
         x: pose.shieldGrip.x + 1,
-        y: pose.shieldGrip.y + (enemy.id === "grunt" ? 13 : 12.5),
+        y: pose.shieldGrip.y + (enemy.id === "grunt" ? 12 : 12.5),
       },
     );
   }
@@ -1387,6 +1408,11 @@ function drawEnemy(enemy) {
 
   const rigPose = currentEnemyRigPose(enemy);
   const rigReady = Boolean(rigPose && enemyRigResources[enemy.id]?.ready);
+  // Lean the whole rig into each blow so the attack reads as a body motion,
+  // not a statue sliding sideways on the existing knock-lunge translate.
+  if (rigReady && knocking && rigPose.mode !== "death") {
+    rigPose.bodyRotation -= 0.15 * knockLunge;
+  }
   if (enemy.dyingTimer > 0 && rigReady) {
     const progress = rigPose.deathProgress;
     const fade = Math.max(0, Math.min(1, (progress - 0.84) / 0.16));
@@ -1402,23 +1428,26 @@ function drawEnemy(enemy) {
     drawEnemyFigure(enemy, knockLunge);
   }
 
+  // The illustrated rigs stand a head taller than the legacy stick figures, so
+  // their pips (and flame) sit higher — the old -60 row landed on the neck.
+  const pipRow = rigReady ? -82 : -60;
   if (enemy.dyingTimer <= 0 && enemy.id !== "boss") {
     // HP pips in dried vermilion; a thin bar for the great-of-heart
     if (enemy.maxHp <= 6) {
       for (let i = 0; i < enemy.maxHp; i++) {
         ctx.fillStyle = i < Math.ceil(enemy.hp) ? "#c0392b" : "rgba(0,0,0,0.25)";
-        ctx.fillRect(-enemy.maxHp * 3.5 + i * 7, -60, 5, 5);
+        ctx.fillRect(-enemy.maxHp * 3.5 + i * 7, pipRow, 5, 5);
       }
     } else {
       ctx.fillStyle = "rgba(0,0,0,0.3)";
-      ctx.fillRect(-16, -60, 32, 5);
+      ctx.fillRect(-16, pipRow, 32, 5);
       ctx.fillStyle = "#c0392b";
-      ctx.fillRect(-16, -60, 32 * Math.max(0, enemy.hp / enemy.maxHp), 5);
+      ctx.fillRect(-16, pipRow, 32 * Math.max(0, enemy.hp / enemy.maxHp), 5);
     }
     // armor pips as steel lozenges
     for (let i = 0; i < enemy.maxArmor; i += 1) {
       ctx.save();
-      ctx.translate(-enemy.maxArmor * 4 + i * 8 + 3, -66);
+      ctx.translate(-enemy.maxArmor * 4 + i * 8 + 3, pipRow - 6);
       ctx.rotate(Math.PI / 4);
       ctx.fillStyle = i < enemy.armor ? "#aab6c4" : "rgba(0,0,0,0.18)";
       ctx.fillRect(-2.6, -2.6, 5.2, 5.2);
@@ -1430,12 +1459,16 @@ function drawEnemy(enemy) {
   }
   // status marks — a lick of flame, a rime of frost
   if (enemy.statuses.burning.active) {
+    const flameLift = rigReady ? -24 : 0;
+    ctx.save();
+    ctx.translate(0, flameLift);
     ctx.fillStyle = VERMILION;
     ctx.beginPath();
     ctx.moveTo(0, -80); ctx.quadraticCurveTo(5, -72, 0, -66); ctx.quadraticCurveTo(-5, -72, 0, -80);
     ctx.fill();
     ctx.fillStyle = "#e8c33a";
     ctx.beginPath(); ctx.arc(0, -70, 2, 0, 7); ctx.fill();
+    ctx.restore();
   }
   if (enemy.statuses.slow.active) {
     ctx.strokeStyle = "#4a7f9b";
