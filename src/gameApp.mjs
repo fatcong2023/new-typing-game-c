@@ -22,10 +22,12 @@ import {
 } from "./gameLogic.mjs";
 import {
   ARCHER_WORLD_SCALE,
-  getArcherRigPose,
-  getLongbowGeometry,
-  scaleArcherRigPoint,
-} from "./archerRig.mjs";
+  drawSpineArcher,
+  getSpineArcherError,
+  getSpineArcherPosePoints,
+  getSpineFullDrawBowHand,
+  isSpineArcherReady,
+} from "./spineArcher.mjs";
 import {
   getEnemyDeathDuration,
   getEnemyRigDefinition,
@@ -46,28 +48,9 @@ const SPAWN_X = W + 60;
 const ARROW_GRAVITY = 680; // px/s² — one sky, one gravity for every shaft
 const DPR = Math.min(window.devicePixelRatio || 1, 2);
 
-const ARCHER_SPRITE_SOURCE = { x: 139, y: 53, w: 789, h: 1351 };
-const ARCHER_SPRITE_DEST = { x: 61.5, y: 472.4, w: 51, h: 87.6 };
 const ARCHER_RIG_ROOT = { x: 87, y: GROUND + 2 };
-const ARCHER_RIG_BODY_SCALE = 0.126;
 const ARCHER_RELEASE_AT = 0.12;
 const ARCHER_ANIMATION_END = 0.62;
-const archerSprite = new Image();
-archerSprite.decoding = "async";
-archerSprite.src = new URL("./assets/english-longbowman-cartoon.png", import.meta.url).href;
-
-const loadArcherRigImage = (filename) => {
-  const image = new Image();
-  image.decoding = "async";
-  image.src = new URL(`./assets/english-longbowman-rig/${filename}`, import.meta.url).href;
-  return image;
-};
-const archerRigImages = {
-  body: loadArcherRigImage("body.png"),
-  bowArm: loadArcherRigImage("bow-arm.png"),
-  drawUpperArm: loadArcherRigImage("draw-upper-arm.png"),
-  drawForearm: loadArcherRigImage("draw-forearm-two-finger.png"),
-};
 
 const ENEMY_RIG_PART_FILES = Object.freeze({
   grunt: Object.freeze([
@@ -404,7 +387,13 @@ function selectArrow(arrowId) {
 
 function beginArcherShot(shots) {
   app.archerDrawProgress = 1;
-  app.archerShot = { active: true, elapsed: 0, released: false, shots };
+  app.archerShot = {
+    active: true,
+    elapsed: 0,
+    released: false,
+    aimPitch: getArcherAimPitch(),
+    shots,
+  };
 }
 
 function updateArcherShot(dt) {
@@ -446,11 +435,14 @@ function getArcherReleaseProgress() {
   return clamp01(app.archerShot.elapsed / ARCHER_ANIMATION_END);
 }
 
-function getCurrentArcherRigPose() {
-  return getArcherRigPose({
-    drawProgress: app.archerDrawProgress,
-    releaseProgress: getArcherReleaseProgress(),
-  });
+function getArcherAimPitch() {
+  if (app.archerShot.active && Number.isFinite(app.archerShot.aimPitch)) {
+    return app.archerShot.aimPitch;
+  }
+  const target = closestEnemy();
+  if (!target) return 12;
+  const distanceProgress = clamp01((target.x - STOP_X) / 850);
+  return 10 + distanceProgress * 18;
 }
 
 function getArcherPoseName() {
@@ -521,8 +513,8 @@ function fireArrow() {
 // the mark after flightTime. it carries its victims and its damage; nothing is
 // dealt until the arrow actually arrives.
 function launchArrow(aimEnemy, hits, arrowId, weaponDamage) {
-  const fullDraw = getArcherRigPose({ drawProgress: 1, releaseProgress: null });
-  const { x: launchX, y: launchY } = archerPointToWorld(fullDraw.bowHand);
+  const fullDrawBowHand = getSpineFullDrawBowHand(getArcherAimPitch()) ?? { x: 27, y: -55 };
+  const { x: launchX, y: launchY } = archerPointToWorld(fullDrawBowHand);
   const slow = aimEnemy.statuses.slow.active ? aimEnemy.statuses.slow.multiplier : 1;
   const targetY = GROUND - 58 + aimEnemy.laneOffset;
   const flightTime = Math.min(1.9, 0.95 + Math.abs(aimEnemy.x - launchX) / 700);
@@ -962,93 +954,6 @@ function drawTower() {
   ctx.fillText(TOWER_LEVELS[app.model.towerLevel - 1].name, bx0 + (bx1 - bx0) / 2, by + 26);
 }
 
-function archerRigReady() {
-  return Object.values(archerRigImages).every((image) => image.complete && image.naturalWidth > 0);
-}
-
-function drawRigLimb(image, from, to, height, endPadding = 3) {
-  const dx = to.x - from.x;
-  const dy = to.y - from.y;
-  const length = Math.hypot(dx, dy);
-  ctx.save();
-  ctx.translate(from.x, from.y);
-  ctx.rotate(Math.atan2(dy, dx));
-  ctx.drawImage(image, -2, -height / 2, length + endPadding, height);
-  ctx.restore();
-}
-
-function drawRigBowStave(geometry) {
-  const traceBow = () => {
-    ctx.beginPath();
-    ctx.moveTo(geometry.top.x, geometry.top.y);
-    ctx.quadraticCurveTo(
-      geometry.control.x,
-      geometry.control.y,
-      geometry.bottom.x,
-      geometry.bottom.y,
-    );
-    ctx.stroke();
-  };
-  ctx.lineCap = "round";
-  ctx.strokeStyle = "#3b2714";
-  ctx.lineWidth = 6;
-  traceBow();
-  ctx.strokeStyle = app.model.activeArrowId === "normal" ? "#c47c22" : ARROW_TINTS[app.model.activeArrowId] ?? "#c47c22";
-  ctx.lineWidth = 3.6;
-  traceBow();
-}
-
-function drawRigStringAndArrow(geometry, showArrow) {
-  ctx.strokeStyle = "#e8d77a";
-  ctx.lineWidth = 1.1;
-  ctx.beginPath();
-  ctx.moveTo(geometry.top.x, geometry.top.y);
-  ctx.lineTo(geometry.nock.x, geometry.nock.y);
-  ctx.lineTo(geometry.bottom.x, geometry.bottom.y);
-  ctx.stroke();
-
-  if (!showArrow) return;
-  const tail = { x: geometry.nock.x - geometry.ux * 12, y: geometry.nock.y - geometry.uy * 12 };
-  const tip = { x: geometry.grip.x + geometry.ux * 13, y: geometry.grip.y + geometry.uy * 13 };
-  ctx.strokeStyle = "#5b4325";
-  ctx.lineWidth = 2;
-  ctx.beginPath(); ctx.moveTo(tail.x, tail.y); ctx.lineTo(tip.x, tip.y); ctx.stroke();
-  ctx.fillStyle = "#c9cdd4";
-  ctx.save();
-  ctx.translate(tip.x, tip.y);
-  ctx.rotate(geometry.aim);
-  ctx.beginPath(); ctx.moveTo(5, 0); ctx.lineTo(-3, -3); ctx.lineTo(-3, 3); ctx.closePath(); ctx.fill();
-  ctx.restore();
-}
-
-function drawSkeletalArcher(ready) {
-  if (!archerRigReady()) return false;
-  const pose = getCurrentArcherRigPose();
-  const showNockedArrow = !app.archerShot.active || app.archerShot.elapsed < ARCHER_RELEASE_AT;
-
-  ctx.save();
-  ctx.translate(ARCHER_RIG_ROOT.x, ARCHER_RIG_ROOT.y);
-  ctx.scale(ARCHER_WORLD_SCALE, ARCHER_WORLD_SCALE);
-  if (ready) {
-    ctx.shadowColor = "rgba(198,154,58,0.8)";
-    ctx.shadowBlur = 7;
-  }
-
-  drawRigLimb(archerRigImages.drawUpperArm, pose.drawShoulder, pose.drawElbow, 15, 4);
-
-  const bodyWidth = archerRigImages.body.naturalWidth * ARCHER_RIG_BODY_SCALE;
-  const bodyHeight = archerRigImages.body.naturalHeight * ARCHER_RIG_BODY_SCALE;
-  ctx.drawImage(archerRigImages.body, -bodyWidth / 2, -bodyHeight, bodyWidth, bodyHeight);
-
-  const bow = getLongbowGeometry(pose);
-  drawRigBowStave(bow);
-  drawRigLimb(archerRigImages.drawForearm, pose.drawElbow, pose.drawHand, 14, 5);
-  drawRigLimb(archerRigImages.bowArm, pose.bowShoulder, pose.bowHand, 14, 5);
-  drawRigStringAndArrow(bow, showNockedArrow);
-  ctx.restore();
-  return true;
-}
-
 function drawArcher() {
   const x = 98;
   const y = 486;
@@ -1057,28 +962,13 @@ function drawArcher() {
   const ready = app.screen === "playing" && app.model.mode === "combat" && app.wordInput === app.combatWord && app.combatWord.length > 0;
   const ang = target ? Math.max(-0.5, Math.min(0.45, Math.atan2(y + 40 - (g - 40), target.x - x) * -1)) : 0.32;
 
-  if (drawSkeletalArcher(ready)) return;
-
-  if (archerSprite.complete && archerSprite.naturalWidth > 0) {
-    ctx.save();
-    if (ready) {
-      ctx.shadowColor = "rgba(198,154,58,0.8)";
-      ctx.shadowBlur = 7;
-    }
-    ctx.drawImage(
-      archerSprite,
-      ARCHER_SPRITE_SOURCE.x,
-      ARCHER_SPRITE_SOURCE.y,
-      ARCHER_SPRITE_SOURCE.w,
-      ARCHER_SPRITE_SOURCE.h,
-      ARCHER_SPRITE_DEST.x,
-      ARCHER_SPRITE_DEST.y,
-      ARCHER_SPRITE_DEST.w,
-      ARCHER_SPRITE_DEST.h,
-    );
-    ctx.restore();
-    return;
-  }
+  if (drawSpineArcher(ctx, {
+    root: ARCHER_RIG_ROOT,
+    drawProgress: app.archerDrawProgress,
+    releaseProgress: getArcherReleaseProgress(),
+    pitchDegrees: getArcherAimPitch(),
+    ready,
+  })) return;
 
   ctx.lineCap = "round";
 
@@ -2046,25 +1936,37 @@ window.advanceTime = (ms) => {
 };
 
 function archerPointToWorld(point) {
-  const scaled = scaleArcherRigPoint(point);
   return {
-    x: Number((ARCHER_RIG_ROOT.x + scaled.x).toFixed(2)),
-    y: Number((ARCHER_RIG_ROOT.y + scaled.y).toFixed(2)),
+    x: Number((ARCHER_RIG_ROOT.x + point.x).toFixed(2)),
+    y: Number((ARCHER_RIG_ROOT.y + point.y).toFixed(2)),
   };
 }
 
 function getArcherTextState() {
-  const pose = getCurrentArcherRigPose();
   const releaseProgress = getArcherReleaseProgress();
+  const pose = getSpineArcherPosePoints({
+    drawProgress: app.archerDrawProgress,
+    releaseProgress,
+    pitchDegrees: getArcherAimPitch(),
+  }) ?? {
+    head: { x: 0, y: -83 },
+    bowShoulder: { x: 6, y: -60 },
+    drawShoulder: { x: -5, y: -60 },
+    bowHand: { x: 27, y: -55 },
+    drawHand: { x: 0, y: -55 },
+    drawElbow: { x: -20, y: -55 },
+  };
   return {
     pose: getArcherPoseName(),
-    animationMode: "skeletal",
+    animationMode: "spine",
     drawProgress: Number(app.archerDrawProgress.toFixed(3)),
     releaseProgress: releaseProgress === null ? null : Number(releaseProgress.toFixed(3)),
     shotActive: app.archerShot.active,
     released: app.archerShot.released,
-    assetsReady: archerRigReady(),
+    assetsReady: isSpineArcherReady(),
+    assetError: getSpineArcherError(),
     displayScale: ARCHER_WORLD_SCALE,
+    aimPitch: Number(getArcherAimPitch().toFixed(2)),
     root: { ...ARCHER_RIG_ROOT },
     head: archerPointToWorld(pose.head),
     bowShoulder: archerPointToWorld(pose.bowShoulder),

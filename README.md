@@ -18,9 +18,9 @@ HTML file directly:
 npm start
 ```
 
-On this Mac, open `http://localhost:8000`. Other devices on the same local
-network can open `http://<this-Mac's-LAN-IP>:8000`; find the current Wi-Fi
-address with `ipconfig getifaddr en0`.
+Open `http://localhost:8000` on the host. The server binds to `0.0.0.0`, so
+other devices on the same local network can use
+`http://<the-host-LAN-IP>:8000`.
 
 ## Controls
 
@@ -56,8 +56,8 @@ Shortcuts held with Cmd/Ctrl/Alt are left to the browser.
   (refused while the walls are whole), and special arrow refills.
 - Barricade path from Sharpened Stakes to Dragonsteel Abatis.
 - Longbowman path from Longbow through Silver/Golden Bow to Fire Musket.
-- Fixed-base skeletal longbow animation: the body, head, and feet keep one
-  anchor while rigged arms, bow, string, and arrow interpolate continuously.
+- Spine 4.3 longbowman animation with the repaired adult proportions, shoulder
+  joints, full draw, flexible bow, release, and distance-driven waist pitch.
 - Illuminated-manuscript presentation: vellum page, gilt borders and corner
   lozenges, St George's cross on the line's standard, fleur-de-lis heater shields,
   a small WebAudio synth for arrows, coins, horns, and typing, and a looping

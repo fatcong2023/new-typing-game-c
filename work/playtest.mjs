@@ -37,20 +37,16 @@ await page.waitForTimeout(100);
 state = JSON.parse(await page.evaluate(() => window.render_game_to_text()));
 if (state.audio.musicMuted) throw new Error("F2 did not restore the background music");
 if (state.enemies.length === 0) throw new Error("Expected at least one spawned enemy");
-if (state.archer.animationMode !== "skeletal") throw new Error(`Expected skeletal animation, got ${state.archer.animationMode}`);
+if (state.archer.animationMode !== "spine") throw new Error(`Expected Spine animation, got ${state.archer.animationMode}`);
 if (!state.archer.assetsReady) throw new Error("Skeletal archer assets did not load");
 const fixedRigAnchors = JSON.stringify({
   root: state.archer.root,
   head: state.archer.head,
-  bowShoulder: state.archer.bowShoulder,
-  drawShoulder: state.archer.drawShoulder,
 });
 const assertStableRig = (current) => {
   const anchors = JSON.stringify({
     root: current.archer.root,
     head: current.archer.head,
-    bowShoulder: current.archer.bowShoulder,
-    drawShoulder: current.archer.drawShoulder,
   });
   if (anchors !== fixedRigAnchors) throw new Error(`Skeletal base drifted: ${anchors}`);
 };
@@ -98,6 +94,9 @@ await page.evaluate(() => window.advanceTime(130));
 state = JSON.parse(await page.evaluate(() => window.render_game_to_text()));
 if (state.combatInput !== "") throw new Error("Combat input did not reset after firing");
 if (state.arrows.length === 0) throw new Error("No live arrow was launched from the release animation");
+if (!state.arrows.every((arrow) => Number.isFinite(arrow.x) && Number.isFinite(arrow.y))) {
+  throw new Error(`Arrow left the Spine bow at an invalid point: ${JSON.stringify(state.arrows)}`);
+}
 await page.screenshot({ path: `${outputDir}/archer-release.png` });
 await page.evaluate(() => window.advanceTime(400));
 
