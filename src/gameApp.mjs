@@ -46,7 +46,6 @@ const TOWER_W = 118;
 const STOP_X = TOWER_X + TOWER_W + 20;
 const SPAWN_X = W + 60;
 const ARROW_GRAVITY = 680; // px/s² — one sky, one gravity for every shaft
-const DPR = Math.min(window.devicePixelRatio || 1, 2);
 
 const ARCHER_RIG_ROOT = { x: 87, y: GROUND + 2 };
 const ARCHER_RELEASE_AT = 0.12;
@@ -107,9 +106,21 @@ const enemyRigResources = {
   runner: loadEnemyRigResource("runner"),
 };
 
-canvas.width = W * DPR;
-canvas.height = H * DPR;
-ctx.scale(DPR, DPR);
+function resizeGameCanvas() {
+  const bounds = canvas.getBoundingClientRect();
+  const pixelRatio = Math.min(window.devicePixelRatio || 1, 3);
+  const width = Math.max(1, Math.round(bounds.width * pixelRatio));
+  const height = Math.max(1, Math.round(bounds.height * pixelRatio));
+  if (canvas.width === width && canvas.height === height) return;
+  canvas.width = width;
+  canvas.height = height;
+  ctx.setTransform(width / W, 0, 0, height / H, 0, 0);
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = "high";
+}
+resizeGameCanvas();
+new ResizeObserver(resizeGameCanvas).observe(canvas);
+window.addEventListener("resize", resizeGameCanvas);
 
 /* ============================================================
    Illuminated-manuscript palette — heraldic pigments & gold leaf.

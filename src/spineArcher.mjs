@@ -3,11 +3,13 @@ import {
   AnimationStateData,
   AssetManager,
   AtlasAttachmentLoader,
+  ManagedWebGLRenderingContext,
   Physics,
   Skeleton,
   SkeletonJson,
-  SkeletonRenderer,
-} from "./vendor/spine-canvas.min.mjs";
+  SceneRenderer,
+} from "./vendor/spine-webgl.min.mjs";
+import { ARCHER_VIEW as VIEW } from "./spineArcherView.mjs";
 
 export const ARCHER_WORLD_SCALE = 0.53;
 export const SPINE_DRAW_DURATION = 0.8;
@@ -21,10 +23,40 @@ const runtime = {
   error: null,
   skeleton: null,
   state: null,
-  renderers: new WeakMap(),
+  surface: null,
+  renderer: null,
+  renderedPoseKey: "",
   currentPoseKey: "",
   fullDrawBowHand: { x: 73, y: 149 },
 };
+
+// A stable padded viewport covers the bow, arrow and all waist pitches. Render
+// the connected mesh in WebGL before compositing it into the 2D game canvas.
+function renderSurface(ctx) {
+  const transform = ctx.getTransform();
+  const pixelScale = Math.min(4, Math.max(1, 2 * ARCHER_WORLD_SCALE *
+    Math.max(Math.hypot(transform.a, transform.b), Math.hypot(transform.c, transform.d))));
+  const width = Math.ceil(VIEW.width * pixelScale);
+  const height = Math.ceil(VIEW.height * pixelScale);
+  const surface = runtime.surface;
+  if (surface.width !== width || surface.height !== height) {
+    surface.width = width;
+    surface.height = height;
+    runtime.renderedPoseKey = "";
+  }
+  if (runtime.renderedPoseKey === runtime.currentPoseKey) return surface;
+
+  const renderer = runtime.renderer;
+  const gl = renderer.context.gl;
+  gl.viewport(0, 0, width, height);
+  gl.clearColor(0, 0, 0, 0);
+  gl.clear(gl.COLOR_BUFFER_BIT);
+  renderer.begin();
+  renderer.drawSkeleton(runtime.skeleton);
+  renderer.end();
+  runtime.renderedPoseKey = runtime.currentPoseKey;
+  return surface;
+}
 
 function applyAnimation(name, time, pitchDegrees = 0) {
   if (!runtime.ready) return false;
@@ -48,7 +80,9 @@ function selectAnimation(drawProgress, releaseProgress, idleTime) {
     return { name: "release", time: releaseProgress * SPINE_RELEASE_DURATION };
   }
   if (drawProgress >= 0.995) {
-    return { name: "full_draw", time: idleTime % 1 };
+    // This exported hold is static. Keeping its sample time stable also avoids
+    // rebuilding an identical mesh on every frame while waiting for Space.
+    return { name: "full_draw", time: 0 };
   }
   if (drawProgress > 0.002) {
     return { name: "draw", time: drawProgress * SPINE_DRAW_DURATION };
@@ -64,7 +98,21 @@ function bonePoint(name) {
 
 async function load() {
   try {
-    const assets = new AssetManager();
+    const surface = document.createElement("canvas");
+    const context = new ManagedWebGLRenderingContext(surface, {
+      alpha: true,
+      premultipliedAlpha: true,
+      antialias: true,
+      // The same full-draw frame can be reused on later animation frames.
+      preserveDrawingBuffer: true,
+    });
+    if (!context.gl) throw new Error("WebGL is unavailable for the Spine longbowman");
+    runtime.surface = surface;
+    surface.addEventListener("webglcontextrestored", () => { runtime.renderedPoseKey = ""; });
+    const renderer = runtime.renderer = new SceneRenderer(surface, context, false);
+    renderer.camera.position.set(VIEW.x + VIEW.width / 2, VIEW.y + VIEW.height / 2, 0);
+    renderer.camera.setViewport(VIEW.width, VIEW.height);
+    const assets = new AssetManager(renderer.context);
     assets.loadTextureAtlas(ATLAS_URL);
     assets.loadJson(JSON_URL);
     await assets.loadAll();
@@ -91,7 +139,7 @@ async function load() {
 export const spineArcherReadyPromise = load();
 
 export function isSpineArcherReady() {
-  return runtime.ready;
+  return runtime.ready && !runtime.renderer.context.gl.isContextLost();
 }
 
 export function getSpineArcherError() {
@@ -106,25 +154,24 @@ export function drawSpineArcher(ctx, {
   pitchDegrees = 0,
   idleTime = performance.now() / 1000,
 }) {
-  if (!runtime.ready) return false;
+  if (!isSpineArcherReady()) return false;
   const animation = selectAnimation(drawProgress, releaseProgress, idleTime);
   applyAnimation(animation.name, animation.time, pitchDegrees);
 
-  let renderer = runtime.renderers.get(ctx);
-  if (!renderer) {
-    renderer = new SkeletonRenderer(ctx);
-    renderer.triangleRendering = true;
-    runtime.renderers.set(ctx, renderer);
-  }
+  const surface = renderSurface(ctx);
 
   ctx.save();
   ctx.translate(root.x, root.y);
-  ctx.scale(ARCHER_WORLD_SCALE, -ARCHER_WORLD_SCALE);
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = "high";
   if (ready) {
     ctx.shadowColor = "rgba(198,154,58,0.8)";
-    ctx.shadowBlur = 18;
+    ctx.shadowBlur = 6;
   }
-  renderer.draw(runtime.skeleton);
+  // Apply the ready glow once to the finished character, never per triangle.
+  ctx.drawImage(surface,
+    VIEW.x * ARCHER_WORLD_SCALE, -(VIEW.y + VIEW.height) * ARCHER_WORLD_SCALE,
+    VIEW.width * ARCHER_WORLD_SCALE, VIEW.height * ARCHER_WORLD_SCALE);
   ctx.restore();
   return true;
 }
