@@ -1,0 +1,25 @@
+[Script Info]
+Title: Typing Game Kids Tutorial
+ScriptType: v4.00+
+PlayResX: 1280
+PlayResY: 720
+WrapStyle: 2
+ScaledBorderAndShadow: yes
+
+[V4+ Styles]
+Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+Style: Welcome,Microsoft YaHei,42,&H00FFFFFF,&H000000FF,&H0020180E,&H9820180E,-1,0,0,0,100,100,0,0,3,2,0,2,35,35,30,1
+Style: Caption,Microsoft YaHei,34,&H00FFFFFF,&H000000FF,&H0020180E,&HA020180E,-1,0,0,0,100,100,0,0,3,2,0,2,35,35,30,1
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+Dialogue: 0,0:00:00.00,0:00:02.60,Welcome,,0,0,0,,小朋友，一起守住城墙吧！
+Dialogue: 0,0:00:02.60,0:00:04.84,Caption,,0,0,0,,第 1 步：按 Enter 开始游戏
+Dialogue: 0,0:00:04.84,0:00:07.35,Caption,,0,0,0,,第 2 步：看上方单词，一个字母一个字母地输入
+Dialogue: 0,0:00:07.35,0:00:08.26,Caption,,0,0,0,,单词变绿，弓也拉满了！
+Dialogue: 0,0:00:08.26,0:00:10.96,Caption,,0,0,0,,按 Space（键盘上的大长条）放箭
+Dialogue: 0,0:00:10.96,0:00:12.70,Caption,,0,0,0,,继续输入下一个单词
+Dialogue: 0,0:00:12.70,0:00:15.12,Caption,,0,0,0,,完成后再按 Space，射出第二支箭
+Dialogue: 0,0:00:15.12,0:00:16.33,Caption,,0,0,0,,第 3 步：按 Tab 切换到句子练习
+Dialogue: 0,0:00:16.33,0:00:19.88,Caption,,0,0,0,,输入整句话，获得训练点和箭矢能量
+Dialogue: 0,0:00:19.88,0:00:22.90,Caption,,0,0,0,,再按 Tab 回到战斗。守住城墙，你一定行！

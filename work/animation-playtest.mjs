@@ -21,7 +21,7 @@ await page.keyboard.press("Enter");
 await page.waitForTimeout(300);
 
 const initial = JSON.parse(await page.evaluate(() => window.render_game_to_text()));
-if (initial.archer.animationMode !== "skeletal") throw new Error(`Expected skeletal rig, got ${initial.archer.animationMode}`);
+if (initial.archer.animationMode !== "spine") throw new Error(`Expected Spine rig, got ${initial.archer.animationMode}`);
 if (!initial.archer.assetsReady) throw new Error("Skeletal rig assets were not ready");
 const fixedAnchors = JSON.stringify({
   root: initial.archer.root,

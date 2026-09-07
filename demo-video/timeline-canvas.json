@@ -1,0 +1,56 @@
+{
+  "recording": {
+    "mimeType": "video/webm;codecs=vp9",
+    "width": 1100,
+    "height": 660
+  },
+  "timeline": [
+    {
+      "name": "title",
+      "time": 0
+    },
+    {
+      "name": "press_enter",
+      "time": 2.608
+    },
+    {
+      "name": "type_first_word",
+      "time": 4.837,
+      "text": "this"
+    },
+    {
+      "name": "first_full_draw",
+      "time": 7.352
+    },
+    {
+      "name": "first_shot",
+      "time": 8.255
+    },
+    {
+      "name": "type_second_word",
+      "time": 10.964,
+      "text": "eye"
+    },
+    {
+      "name": "second_shot",
+      "time": 12.704
+    },
+    {
+      "name": "open_training",
+      "time": 15.119
+    },
+    {
+      "name": "type_training_phrase",
+      "time": 16.332,
+      "text": "practice makes perfect"
+    },
+    {
+      "name": "return_to_combat",
+      "time": 19.882
+    },
+    {
+      "name": "end",
+      "time": 22.897
+    }
+  ]
+}
