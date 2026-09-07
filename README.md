@@ -58,6 +58,8 @@ Shortcuts held with Cmd/Ctrl/Alt are left to the browser.
 - Longbowman path from Longbow through Silver/Golden Bow to Fire Musket.
 - Spine 4.3 longbowman animation with the repaired adult proportions, shoulder
   joints, full draw, flexible bow, release, and distance-driven waist pitch.
+- WebGL mesh rendering keeps the archer's artwork continuous. The game canvas
+  follows its displayed size and screen pixel density, including window resizing.
 - Illuminated-manuscript presentation: vellum page, gilt borders and corner
   lozenges, St George's cross on the line's standard, fleur-de-lis heater shields,
   a small WebAudio synth for arrows, coins, horns, and typing, and a looping
@@ -71,4 +73,10 @@ Shortcuts held with Cmd/Ctrl/Alt are left to the browser.
 ```bash
 npm test
 node work/playtest.mjs   # requires playwright and a server on :8000
+node work/spine-rendering-playtest.mjs # draw/hold/release, frame timing and HiDPI resizing
 ```
+
+The Spine playtest accepts `PLAYTEST_URL`, `PLAYTEST_OUTPUT_DIR`, and
+`PLAYWRIGHT_MODULE` (a module specifier or file URL when Playwright is installed
+elsewhere). Set `PLAYTEST_SOFTWARE_GL=1` to check the software WebGL fallback;
+frame timing from that run is not representative of GPU rendering.
