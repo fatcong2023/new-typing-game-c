@@ -1,25 +1,33 @@
 import fs from "node:fs/promises";
-import { chromium } from "playwright";
+
+const { chromium } = await import(process.env.PLAYWRIGHT_MODULE ?? "playwright");
+const url = process.env.PLAYTEST_URL ?? "http://localhost:8000";
 
 const outputDir = process.env.ENEMY_PLAYTEST_OUTPUT_DIR
-  ?? `${process.env.HOME}/tmp/enemy-skeletal-animation-playtest`;
+  ?? process.env.PLAYTEST_OUTPUT_DIR
+  ?? "output/enemy-animation-playtest";
 await fs.mkdir(outputDir, { recursive: true });
 
 const browser = await chromium.launch({
   headless: true,
-  args: ["--use-gl=angle", "--use-angle=swiftshader"],
+  args: process.env.PLAYTEST_SOFTWARE_GL ? ["--use-gl=angle", "--use-angle=swiftshader"] : [],
 });
+try {
 const page = await browser.newPage({ viewport: { width: 1200, height: 760 } });
+// Hold gameplay time while preserving the asset loader's animation-frame polls.
+await page.addInitScript(() => {
+  const requestFrame = window.requestAnimationFrame.bind(window);
+  window.requestAnimationFrame = callback => callback.name === "frame" ? -1 : requestFrame(callback);
+});
 const errors = [];
 page.on("console", (message) => {
   if (message.type() === "error") errors.push({ type: "console", text: message.text() });
 });
 page.on("pageerror", (error) => errors.push({ type: "pageerror", text: String(error) }));
 
-await page.goto("http://localhost:8000", { waitUntil: "domcontentloaded" });
-await page.waitForTimeout(500);
+await page.goto(url, { waitUntil: "domcontentloaded" });
+await page.waitForFunction(() => window.__game, null, { polling: 50 });
 await page.keyboard.press("Enter");
-await page.waitForTimeout(350);
 
 await page.evaluate(() => {
   const makeEnemy = (id, x) => ({
@@ -39,6 +47,7 @@ await page.evaluate(() => {
     deathDuration: 1.25,
     phase: 0,
     attackTimer: 0,
+    spineMode: "walk",
     statuses: {
       burning: { active: false },
       poison: { active: false },
@@ -49,6 +58,10 @@ await page.evaluate(() => {
   window.__game.app.spawnTimer = 999;
   window.__game.render();
 });
+await page.waitForFunction(() => {
+  const animations = JSON.parse(window.render_game_to_text()).enemyAnimations;
+  return animations.length === 2 && animations.every(enemy => enemy.assetsReady);
+}, null, { polling: 50, timeout: 30000 });
 
 const state = async () => JSON.parse(await page.evaluate(() => window.render_game_to_text()));
 const initial = await state();
@@ -56,15 +69,15 @@ if (!Array.isArray(initial.enemyAnimations) || initial.enemyAnimations.length !=
   throw new Error("Expected render_game_to_text to expose both enemy skeletons");
 }
 for (const enemy of initial.enemyAnimations) {
-  if (enemy.animationMode !== "skeletal") throw new Error(`${enemy.id} is not skeletal`);
+  const expectedMode = enemy.id === "grunt" ? "spine" : "skeletal";
+  if (enemy.animationMode !== expectedMode) throw new Error(`${enemy.id} is not ${expectedMode}`);
   if (!enemy.assetsReady) throw new Error(`${enemy.id} rig assets are not ready`);
   if (Object.keys(enemy.joints ?? {}).length < 17) throw new Error(`${enemy.id} rig has too few joints`);
 }
 
 const capture = async (filename) => {
-  await page.screenshot({
+  await page.locator("#game").screenshot({
     path: `${outputDir}/${filename}`,
-    clip: { x: 250, y: 455, width: 570, height: 190 },
   });
 };
 
@@ -88,6 +101,9 @@ for (let index = 0; index <= 8; index += 1) {
       enemy.alive = false;
       enemy.deathDuration = 1.25;
       enemy.dyingTimer = Math.max(0.001, enemy.deathDuration * (1 - value));
+      if (enemy.id === "grunt") {
+        enemy.spineDeathPose = { mode: "walk", time: enemy.phase / (Math.PI * 2) * 1.2 };
+      }
     }
     window.__game.render();
   }, progress);
@@ -107,8 +123,9 @@ const clutchSnapshot = await page.evaluate(() => {
   return JSON.parse(window.render_game_to_text());
 });
 for (const enemy of clutchSnapshot.enemyAnimations) {
+  if (enemy.id !== "runner") continue;
   const chest = enemy.joints.chest;
-  const hand = enemy.joints.nearWrist;
+  const hand = enemy.joints.farWrist;
   if (Math.hypot(hand.x - chest.x, hand.y - chest.y) >= 4) {
     throw new Error(`${enemy.id} hand did not reach chest in the hit reaction`);
   }
@@ -120,4 +137,6 @@ if (errors.length) {
 }
 
 await fs.writeFile(`${outputDir}/state.json`, JSON.stringify(clutchSnapshot, null, 2));
+} finally {
 await browser.close();
+}

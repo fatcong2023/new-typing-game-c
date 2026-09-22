@@ -60,6 +60,10 @@ Shortcuts held with Cmd/Ctrl/Alt are left to the browser.
   joints, full draw, flexible bow, release, and distance-driven waist pitch.
 - WebGL mesh rendering keeps the archer's artwork continuous. The game canvas
   follows its displayed size and screen pixel density, including window resizing.
+- French light infantry uses the approved Spine soldier: an overhead-shield walk
+  and a raised-arm downward sword strike. Each 1.2-second attack damages the
+  barricade at 0.64 seconds, during the cut. Defeated soldiers keep their current
+  artwork while falling and fading.
 - Illuminated-manuscript presentation: vellum page, gilt borders and corner
   lozenges, St George's cross on the line's standard, fleur-de-lis heater shields,
   a small WebAudio synth for arrows, coins, horns, and typing, and a looping
@@ -74,9 +78,17 @@ Shortcuts held with Cmd/Ctrl/Alt are left to the browser.
 npm test
 node work/playtest.mjs   # requires playwright and a server on :8000
 node work/spine-rendering-playtest.mjs # draw/hold/release, frame timing and HiDPI resizing
+node work/french-soldier-playtest.mjs # walk, sword strike, impact timing, death and multiple enemies
 ```
 
 The Spine playtest accepts `PLAYTEST_URL`, `PLAYTEST_OUTPUT_DIR`, and
 `PLAYWRIGHT_MODULE` (a module specifier or file URL when Playwright is installed
 elsewhere). Set `PLAYTEST_SOFTWARE_GL=1` to check the software WebGL fallback;
 frame timing from that run is not representative of GPU rendering.
+
+The French soldier's editable source is `spine/french-soldier/french-soldier-combat.spine`.
+Its Spine 4.3 JSON, atlas and texture ship together under `src/assets/spine/` as
+`french-soldier-combat.*`. To update the game after editing the source, export
+JSON plus a packed texture atlas to that directory, preserving the two animation
+names `walk_shield_overhead` and `attack_shield_overhead`. Runtime sampling and
+impact timing are in `src/soldierAnimation.mjs`; drawing is in `src/spineSoldier.mjs`.

@@ -29,6 +29,17 @@ import {
   isSpineArcherReady,
 } from "./spineArcher.mjs";
 import {
+  drawSpineSoldier,
+  getSpineSoldierTextState,
+  isSpineSoldierReady,
+  getSpineSoldierError,
+} from "./spineSoldier.mjs";
+import {
+  SOLDIER_ATTACK_DURATION,
+  SOLDIER_IMPACT_TIME,
+  advanceSoldierAttack,
+} from "./soldierAnimation.mjs";
+import {
   getEnemyDeathDuration,
   getEnemyRigDefinition,
   getEnemyRigPose,
@@ -52,14 +63,6 @@ const ARCHER_RELEASE_AT = 0.12;
 const ARCHER_ANIMATION_END = 0.62;
 
 const ENEMY_RIG_PART_FILES = Object.freeze({
-  grunt: Object.freeze([
-    "head", "torso", "pelvis",
-    "near_upper_arm", "near_forearm_hand",
-    "far_upper_arm", "far_forearm_hand",
-    "near_thigh", "near_shin_boot", "near_shin", "near_boot",
-    "far_thigh", "far_shin_boot", "far_shin", "far_boot",
-    "sword", "shield",
-  ]),
   runner: Object.freeze([
     "head", "torso", "pelvis",
     "near_upper_arm", "near_forearm_hand",
@@ -102,7 +105,6 @@ function loadEnemyRigResource(enemyId) {
 }
 
 const enemyRigResources = {
-  grunt: loadEnemyRigResource("grunt"),
   runner: loadEnemyRigResource("runner"),
 };
 
@@ -335,6 +337,7 @@ function spawnEnemy() {
     alive: true,
     dyingTimer: 0,
     phase: rand() * Math.PI * 2,
+    spineMode: "walk",
   });
   const tier = getLevelTier(app.model.level);
   if (enemy.id === "boss") {
@@ -554,6 +557,15 @@ function resolveArrowImpact(arrow) {
 
 function defeatEnemy(enemy) {
   if (enemy.dyingTimer > 0) return;
+  if (enemy.id === "grunt") {
+    const attacking = enemy.spineMode === "attack" || enemy.x <= STOP_X;
+    enemy.spineDeathPose = {
+      mode: attacking ? "attack" : "walk",
+      time: attacking
+        ? enemy.attackTimer
+        : ((enemy.phase / (Math.PI * 2)) % 1 + 1) % 1 * SOLDIER_ATTACK_DURATION,
+    };
+  }
   enemy.alive = false;
   enemy.deathDuration = getEnemyDeathDuration(enemy.id);
   enemy.dyingTimer = enemy.deathDuration;
@@ -691,11 +703,32 @@ function update(dt) {
     const slow = enemy.statuses.slow.active ? enemy.statuses.slow.multiplier : 1;
     if (enemy.x > STOP_X) {
       enemy.x -= enemy.speed * slow * dt;
-      enemy.phase += dt * 6;
+      if (enemy.id === "grunt") {
+        enemy.phase += dt * Math.PI * 2 / SOLDIER_ATTACK_DURATION * slow;
+        enemy.spineMode = "walk";
+        if (enemy.x <= STOP_X) {
+          enemy.x = STOP_X;
+          enemy.spineMode = "attack";
+          enemy.attackTimer = 0;
+        }
+      } else {
+        enemy.phase += dt * 6;
+      }
     } else {
-      enemy.attackTimer += dt;
-      if (enemy.attackTimer >= 1.2) {
-        enemy.attackTimer -= 1.2;
+      let hits = 0;
+      if (enemy.id === "grunt") {
+        enemy.spineMode = "attack";
+        const attack = advanceSoldierAttack(enemy.attackTimer, dt);
+        enemy.attackTimer = attack.time;
+        hits = attack.hits;
+      } else {
+        enemy.attackTimer += dt;
+        if (enemy.attackTimer >= 1.2) {
+          enemy.attackTimer -= 1.2;
+          hits = 1;
+        }
+      }
+      for (let hit = 0; hit < hits; hit += 1) {
         const reduction = TOWER_LEVELS[app.model.towerLevel - 1].damageReduction;
         app.model.towerHp = Math.max(0, app.model.towerHp - Math.ceil(enemy.towerDamage * (1 - reduction)));
         addBurst(STOP_X - 8, GROUND - 52, "#8d8677", 8);
@@ -1059,7 +1092,7 @@ function drawArcher() {
 }
 
 function currentEnemyRigPose(enemy) {
-  if (!getEnemyRigDefinition(enemy.id)) return null;
+  if (enemy.id === "grunt" || !getEnemyRigDefinition(enemy.id)) return null;
   const deathDuration = enemy.deathDuration || getEnemyDeathDuration(enemy.id);
   const deathProgress = enemy.dyingTimer > 0
     ? Math.max(0, Math.min(1, 1 - enemy.dyingTimer / deathDuration))
@@ -1221,6 +1254,22 @@ function drawIllustratedEnemyRig(enemy, pose) {
 
 // shared fallback figure so unillustrated foes and the start-screen legend match
 function drawEnemyFigure(enemy, knockLunge) {
+  if (enemy.id === "grunt") {
+    const preview = !Number.isFinite(enemy.x);
+    ctx.save();
+    if (preview) ctx.scale(0.58, 0.58);
+    const drawn = drawSpineSoldier(ctx, preview ? {
+      ...enemy,
+      spineMode: "walk",
+      alive: true,
+      dyingTimer: 0,
+      attackTimer: 0,
+    } : enemy);
+    ctx.restore();
+    if (drawn) return;
+    // Loading the replacement should not flash the retired cutout artwork.
+    if (!getSpineSoldierError()) return;
+  }
   const pig = ENEMY_PIGMENTS[enemy.id] ?? { body: "#8b8272", trim: "#4c443a" };
   const swing = knockLunge > 0 ? 0 : Math.sin(enemy.phase) * 0.55;
 
@@ -1303,8 +1352,9 @@ function drawEnemy(enemy) {
   // 1.4x base so the French host stands eye-to-eye with the English bowman
   const scale = (enemy.id === "boss" ? 1.55 : enemy.id === "brute" ? 1.2 : enemy.id === "swarm" ? 0.85 : 1) * 1.4;
   ctx.save();
+  const spineSoldier = enemy.id === "grunt";
   const knocking = enemy.dyingTimer <= 0 && enemy.alive && enemy.x <= STOP_X;
-  const knockLunge = knocking ? Math.abs(Math.sin(enemy.attackTimer / 1.2 * Math.PI)) : 0;
+  const knockLunge = knocking && !spineSoldier ? Math.abs(Math.sin(enemy.attackTimer / 1.2 * Math.PI)) : 0;
   ctx.translate(enemy.x - knockLunge * 7, GROUND + enemy.laneOffset * 0.4);
 
   const rigPose = currentEnemyRigPose(enemy);
@@ -1314,11 +1364,11 @@ function drawEnemy(enemy) {
   if (rigReady && knocking && rigPose.mode !== "death") {
     rigPose.bodyRotation -= 0.15 * knockLunge;
   }
-  if (enemy.dyingTimer > 0 && rigReady) {
+  if (!spineSoldier && enemy.dyingTimer > 0 && rigReady) {
     const progress = rigPose.deathProgress;
     const fade = Math.max(0, Math.min(1, (progress - 0.84) / 0.16));
     ctx.globalAlpha = 1 - fade * 0.78;
-  } else if (enemy.dyingTimer > 0) {
+  } else if (!spineSoldier && enemy.dyingTimer > 0) {
     const duration = enemy.deathDuration || 0.45;
     const k = 1 - enemy.dyingTimer / duration;
     ctx.globalAlpha = Math.max(0, 1 - k * 1.15);
@@ -1331,7 +1381,7 @@ function drawEnemy(enemy) {
 
   // The illustrated rigs stand a head taller than the legacy stick figures, so
   // their pips (and flame) sit higher — the old -60 row landed on the neck.
-  const pipRow = rigReady ? -82 : -60;
+  const pipRow = spineSoldier && isSpineSoldierReady() ? -116 : rigReady ? -82 : -60;
   if (enemy.dyingTimer <= 0 && enemy.id !== "boss") {
     // HP pips in dried vermilion; a thin bar for the great-of-heart
     if (enemy.maxHp <= 6) {
@@ -1360,7 +1410,7 @@ function drawEnemy(enemy) {
   }
   // status marks — a lick of flame, a rime of frost
   if (enemy.statuses.burning.active) {
-    const flameLift = rigReady ? -24 : 0;
+    const flameLift = spineSoldier && isSpineSoldierReady() ? -58 : rigReady ? -24 : 0;
     ctx.save();
     ctx.translate(0, flameLift);
     ctx.fillStyle = VERMILION;
@@ -2006,6 +2056,21 @@ function getEnemyAnimationTextState() {
   return app.enemies
     .filter((enemy) => getEnemyRigDefinition(enemy.id) && (enemy.alive || enemy.dyingTimer > 0))
     .map((enemy) => {
+      if (enemy.id === "grunt") {
+        const pose = getSpineSoldierTextState(enemy);
+        const toWorld = (point) => ({
+          x: Number((enemy.x + point.x * 1.4).toFixed(2)),
+          y: Number((GROUND + enemy.laneOffset * 0.4 + point.y * 1.4).toFixed(2)),
+        });
+        return {
+          id: enemy.id,
+          ...pose,
+          attackDuration: SOLDIER_ATTACK_DURATION,
+          impactTime: SOLDIER_IMPACT_TIME,
+          root: toWorld(pose.root),
+          joints: Object.fromEntries(Object.entries(pose.joints).map(([name, point]) => [name, toWorld(point)])),
+        };
+      }
       const pose = currentEnemyRigPose(enemy);
       return {
         id: enemy.id,
