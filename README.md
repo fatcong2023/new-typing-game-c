@@ -42,6 +42,23 @@ other devices on the same local network can use
 
 Shortcuts held with Cmd/Ctrl/Alt are left to the browser.
 
+## Tester mode
+
+A faint lock in the bottom-right corner opens a password prompt (the password
+is `TESTER_PASSWORD` in `src/testerMode.mjs`). Once unlocked, a 测试者模式
+button in the top-left opens a panel that can:
+
+- jump to any level, or to the first level of any tier;
+- run the enemy side paused or at 0.5×, 1× or 2× speed;
+- end the level on the next kill, or finish it at once;
+- keep the barricade from losing HP;
+- add 1000 gold, 10 Training Points and 10 Arrow Charge;
+- summon any of the ten enemy types into view.
+
+The unlock lasts until the browser tab is closed. 退出测试者模式 hides the
+panel again and turns every cheat off. The password only keeps the tools out of
+a child's way; it is not security.
+
 ## Implemented systems
 
 - 100-level campaign tiering with word-length bands increasing every 10 levels.
@@ -74,9 +91,12 @@ Shortcuts held with Cmd/Ctrl/Alt are left to the browser.
 npm test
 node work/playtest.mjs   # requires playwright and a server on :8000
 node work/spine-rendering-playtest.mjs # draw/hold/release, frame timing and HiDPI resizing
+node work/tester-mode-playtest.mjs # tester password, keyboard isolation and every tester tool
 ```
 
-The Spine playtest accepts `PLAYTEST_URL`, `PLAYTEST_OUTPUT_DIR`, and
-`PLAYWRIGHT_MODULE` (a module specifier or file URL when Playwright is installed
-elsewhere). Set `PLAYTEST_SOFTWARE_GL=1` to check the software WebGL fallback;
-frame timing from that run is not representative of GPU rendering.
+The Spine and tester-mode playtests accept `PLAYTEST_URL`, `PLAYTEST_OUTPUT_DIR`,
+and `PLAYWRIGHT_MODULE` (a module specifier or file URL when Playwright is
+installed elsewhere). Set `PLAYTEST_SOFTWARE_GL=1` to check the software WebGL
+fallback; frame timing from that run is not representative of GPU rendering.
+The tester-mode playtest also accepts `PLAYTEST_CHANNEL=chrome` to drive the
+installed Chrome when Playwright's own Chromium build is not downloaded.

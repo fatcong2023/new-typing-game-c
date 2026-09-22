@@ -416,3 +416,24 @@ Original prompt: OK, 那我们现在按照这个电子表格里面的， 把游�
   alternate.
 - Switched the game to `medieval-ensemble-loop.ogg` and exposed the three-part
   arrangement in `render_game_to_text`.
+
+## 2026-09-22 — password-gated tester mode
+
+- Added a faint lock in the page's bottom-right corner that opens a password
+  prompt. The right password reveals a 测试者模式 button, remembered for the
+  tab through `sessionStorage`; a wrong one is refused and cleared, and its
+  Enter never reaches the game.
+- The tester panel jumps to any level or to a tier's first level, runs the
+  enemy side paused or at 0.5×, 1× or 2× speed, ends a level on the next kill,
+  keeps the barricade invincible, finishes the level at once, adds gold,
+  Training Points and Arrow Charge, and summons any of the ten enemy types into
+  view. Spawning, marching, attacks and status ticks share the scaled enemy
+  clock; deaths, arrows and the bowman keep real time, so a paused field can
+  still be shot at, and the arrow lead follows the scaled march.
+- Extracted `createLevelEnemy` from `spawnEnemy` without changing the order of
+  seeded random draws, so a seed still replays the same campaign.
+- Keys typed into the tester UI stop at its root; clicked buttons and
+  successful jumps hand focus straight back to the game. The panel is capped at
+  60vh so it stops above the bowman's head on landscape screens.
+- Added unit tests for the pure helpers and `work/tester-mode-playtest.mjs`, a
+  Playwright pass over the whole flow.
