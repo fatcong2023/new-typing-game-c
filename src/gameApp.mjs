@@ -35,6 +35,12 @@ import {
   getEnemyRigRenderPlan,
 } from "./enemyRig.mjs";
 import { getRigPartTransform } from "./rigGeometry.mjs";
+import {
+  clampLevel,
+  createTesterSettings,
+  grantTesterResources,
+  mountTesterMode,
+} from "./testerMode.mjs";
 
 const canvas = document.getElementById("game");
 const ctx = canvas.getContext("2d");
@@ -243,6 +249,7 @@ const app = {
   selectedEnemyIndex: 0,
   rngSeed: Date.now() >>> 0,
   rng: mulberry32(Date.now() >>> 0),
+  tester: createTesterSettings(),
   lastFrame: 0,
 };
 
@@ -293,17 +300,17 @@ function announce(message, seconds = 2) {
   app.messageTimer = seconds;
 }
 
-function startCampaign() {
+function startCampaign(startLevel = 1) {
   app.rngSeed = Date.now() >>> 0;
   app.rng = mulberry32(app.rngSeed);
-  app.model = createGameModel({ level: 1, gold: 40, trainingPoints: 0, arrowCharge: 3 });
+  app.model = createGameModel({ level: startLevel, gold: 40, trainingPoints: 0, arrowCharge: 3 });
   app.phraseIndex = 0;
   app.message = "";
   app.messageTimer = 0;
   app.shakeTimer = 0;
   app.screen = "playing";
   setupLevel();
-  announce("Level 1: hold the line", 2.2);
+  announce(`Level ${startLevel}: hold the line`, 2.2);
 }
 
 function setupLevel() {
@@ -328,8 +335,13 @@ function spawnEnemy() {
   let enemyId = pick(config.enemyIds);
   const isBossLevel = app.model.level % 10 === 0;
   if (isBossLevel && app.spawned === app.levelQuota - 1) enemyId = "boss";
+  app.enemies.push(createLevelEnemy(enemyId, SPAWN_X + rand() * 40));
+  app.spawned += 1;
+}
+
+function createLevelEnemy(enemyId, x) {
   const enemy = createCombatEnemy(enemyId, {
-    x: SPAWN_X + rand() * 40,
+    x,
     laneOffset: rand() * 16 - 8,
     attackTimer: 0,
     alive: true,
@@ -346,8 +358,35 @@ function spawnEnemy() {
     enemy.rewardGold += tier * 18;
     enemy.towerDamage += tier;
   }
-  app.enemies.push(enemy);
-  app.spawned += 1;
+  return enemy;
+}
+
+// Tester summons stand inside the field, so they can be studied even while the
+// enemy side is paused, and they do not count toward the level quota.
+function summonEnemy(enemyId) {
+  if (app.screen !== "playing") return false;
+  app.enemies.push(createLevelEnemy(enemyId, W - 110 - rand() * 330));
+  return true;
+}
+
+// Tester jump: from a title screen it opens a fresh campaign at that level;
+// mid-campaign it keeps the war chest and upgrades.
+function jumpToLevel(level) {
+  const target = clampLevel(level);
+  if (target === null) return false;
+  if (app.screen === "playing" || app.screen === "shop") {
+    app.model.level = target;
+    app.screen = "playing";
+    setupLevel();
+    announce(`Level ${target}: Tier ${getLevelTier(target)}`, 2);
+  } else {
+    startCampaign(target);
+  }
+  // an arrow from a higher tier must not stay nocked after jumping down
+  if (!getUnlockedArrowIds(getLevelTier(target)).includes(app.model.activeArrowId)) {
+    app.model.activeArrowId = "normal";
+  }
+  return true;
 }
 
 function livingEnemies() {
@@ -530,7 +569,8 @@ function launchArrow(aimEnemy, hits, arrowId, weaponDamage) {
   const targetY = GROUND - 58 + aimEnemy.laneOffset;
   const flightTime = Math.min(1.9, 0.95 + Math.abs(aimEnemy.x - launchX) / 700);
   // lead the mark so the shaft falls where the foe will be, not where it was
-  const leadX = aimEnemy.x > STOP_X ? aimEnemy.x - aimEnemy.speed * slow * flightTime : aimEnemy.x;
+  const march = aimEnemy.speed * slow * app.tester.enemySpeed;
+  const leadX = aimEnemy.x > STOP_X ? aimEnemy.x - march * flightTime : aimEnemy.x;
   const targetX = Math.max(STOP_X - 6, leadX);
   app.arrows.push({
     x0: launchX, y0: launchY, x: launchX, y: launchY,
@@ -552,7 +592,7 @@ function resolveArrowImpact(arrow) {
   if (arrow.arrowId === "explosive") addBurst(arrow.x, GROUND - 52, "#c98a3a", 18);
 }
 
-function defeatEnemy(enemy) {
+function defeatEnemy(enemy, { byTester = false } = {}) {
   if (enemy.dyingTimer > 0) return;
   enemy.alive = false;
   enemy.deathDuration = getEnemyDeathDuration(enemy.id);
@@ -560,7 +600,18 @@ function defeatEnemy(enemy) {
   app.model.gold += enemy.rewardGold;
   app.defeatedThisLevel += 1;
   addBurst(enemy.x, GROUND - 50, "#b03a2e", enemy.id === "boss" ? 26 : 14);
+  if (byTester) return;
   sfx.kill();
+  if (app.tester.oneKillClears) finishLevelNow();
+}
+
+// Tester shortcut: the rest of the field falls at once and no more foes march,
+// so the usual level-clear flow opens the armory once the deaths play out.
+function finishLevelNow() {
+  if (app.screen !== "playing") return false;
+  for (const enemy of livingEnemies()) defeatEnemy(enemy, { byTester: true });
+  app.spawned = Math.max(app.spawned, app.levelQuota);
+  return true;
 }
 
 function addBurst(x, y, color, count) {
@@ -671,8 +722,12 @@ function update(dt) {
   if (app.screen !== "playing") return;
 
   const config = getLevelConfig(app.model.level);
-  app.spawnTimer -= dt;
-  if (app.spawned < app.levelQuota && app.spawnTimer <= 0 && livingEnemies().length < config.maxAlive) {
+  // The tester's speed setting runs the whole enemy side on its own clock;
+  // deaths, arrows and the bowman keep real time, so a paused field can still
+  // be shot at.
+  const enemyDt = dt * app.tester.enemySpeed;
+  app.spawnTimer -= enemyDt;
+  if (app.tester.enemySpeed > 0 && app.spawned < app.levelQuota && app.spawnTimer <= 0 && livingEnemies().length < config.maxAlive) {
     spawnEnemy();
     app.spawnTimer = Math.max(0.38, config.spawnInterval - app.model.level * 0.006) * (0.75 + rand() * 0.5);
   }
@@ -683,21 +738,22 @@ function update(dt) {
       continue;
     }
     if (!enemy.alive) continue;
-    tickStatusEffects(enemy, dt);
+    tickStatusEffects(enemy, enemyDt);
     if (!enemy.alive) {
       defeatEnemy(enemy);
       continue;
     }
     const slow = enemy.statuses.slow.active ? enemy.statuses.slow.multiplier : 1;
     if (enemy.x > STOP_X) {
-      enemy.x -= enemy.speed * slow * dt;
-      enemy.phase += dt * 6;
+      enemy.x -= enemy.speed * slow * enemyDt;
+      enemy.phase += enemyDt * 6;
     } else {
-      enemy.attackTimer += dt;
+      enemy.attackTimer += enemyDt;
       if (enemy.attackTimer >= 1.2) {
         enemy.attackTimer -= 1.2;
         const reduction = TOWER_LEVELS[app.model.towerLevel - 1].damageReduction;
-        app.model.towerHp = Math.max(0, app.model.towerHp - Math.ceil(enemy.towerDamage * (1 - reduction)));
+        const damage = app.tester.invincible ? 0 : Math.ceil(enemy.towerDamage * (1 - reduction));
+        app.model.towerHp = Math.max(0, app.model.towerHp - damage);
         addBurst(STOP_X - 8, GROUND - 52, "#8d8677", 8);
         app.shakeTimer = Math.max(app.shakeTimer, 0.18);
         sfx.knock();
@@ -2050,6 +2106,7 @@ window.render_game_to_text = () => JSON.stringify({
     tier: app.model.longbowmanTier,
     activeArrowId: app.model.activeArrowId,
   },
+  tester: { ...app.tester },
   archer: getArcherTextState(),
   enemyAnimations: getEnemyAnimationTextState(),
   arrows: app.arrows.map((arrow) => ({
@@ -2080,9 +2137,21 @@ window.__game = {
   selectArrow,
   fireArrow,
   typeCharacter,
+  jumpToLevel,
+  finishLevelNow,
+  summonEnemy,
   update,
   render: draw,
   renderText: window.render_game_to_text,
 };
+
+mountTesterMode({
+  settings: app.tester,
+  getLevel: () => app.model.level,
+  jumpToLevel,
+  finishLevelNow,
+  summonEnemy,
+  grantResources: () => grantTesterResources(app.model),
+});
 
 requestAnimationFrame(frame);
